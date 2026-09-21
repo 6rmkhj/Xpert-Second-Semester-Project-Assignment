@@ -1,0 +1,4 @@
+xpert-ecoroute.duckdns.org {
+    encode gzip
+    reverse_proxy ecoroute:8000
+}

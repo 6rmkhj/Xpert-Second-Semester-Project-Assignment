@@ -1,0 +1,19 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": { "Federated": "arn:aws:iam::020212777377:oidc-provider/token.actions.githubusercontent.com" },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com" },
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": [
+            "repo:6rmkhj/Xpert-Second-Semester-Project-Assignment:ref:refs/heads/main",
+            "repo:6rmkhj@*/Xpert-Second-Semester-Project-Assignment@*:ref:refs/heads/main"
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow", "Action": "ecr:GetAuthorizationToken", "Resource": "*" },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:InitiateLayerUpload",
+        "ecr:UploadLayerPart",
+        "ecr:CompleteLayerUpload",
+        "ecr:PutImage",
+        "ecr:BatchGetImage"
+      ],
+      "Resource": "arn:aws:ecr:ap-northeast-2:020212777377:repository/ecoroute"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "ssm:SendCommand",
+      "Resource": [
+        "arn:aws:ec2:ap-northeast-2:020212777377:instance/i-09cd97b1262226d3e",
+        "arn:aws:ssm:ap-northeast-2::document/AWS-RunShellScript"
+      ]
+    },
+    { "Effect": "Allow", "Action": "ssm:GetCommandInvocation", "Resource": "*" }
+  ]
+}
