@@ -1,520 +1,230 @@
+// EcoRoute 프런트엔드 — Figma "EcoRoute Wireframe v2" 흐름(D1–D7) 기준.
+// 모션 역할: anime.js = SVG 경로 드로잉·카운트업·막대 stagger, Motion = 스프링 UI 전환.
+const anime = window.anime;
+const Motion = window.Motion;
+const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const canAnimate = (lib) => Boolean(lib) && !reduceMotion;
+
+// 휘발유 기준으로 통일 (route_energy.py: 33.7kWh/gal, 8.887kgCO₂/gal ≈ 8.9kWh/L, 2.35kgCO₂/L)
+const GASOLINE_KWH_PER_L = 8.9;
+const GASOLINE_CO2_KG_PER_L = 2.35;
+const GASOLINE_KRW_PER_L = 1680; // 와이어프레임 v2 예시 단가
+const CO2_KG_PER_KWH = GASOLINE_CO2_KG_PER_L / GASOLINE_KWH_PER_L;
+
+const ECO_COLOR = "#0e9f6e";
+const FAST_COLOR = "#6b7682";
+const ALT_COLORS = ["#c4891c", "#8b5e3c", "#5a7896"];
+const WEEK = ["월", "화", "수", "목", "금", "토", "일"];
+const VEHICLE_LABELS = { compact: "소형차", midsize: "중형차", truck: "트럭" };
+const GUEST_KEY = "ecoroute-weekly-records-v2";
+const INTRO_KEY = "ecoroute-intro-seen";
+const SUGGESTED_PLACES = [
+  "Depot Plaza",
+  "Yost Ice Arena",
+  "University of Michigan Soccer Complex",
+  "Ann Arbor District Library Traverwood",
+  "Gallup One Stop",
+  "Lawton Park",
+];
+const VIEWS = ["plan", "weekly", "trips"];
+
 const state = {
   config: null,
-  setupMap: null,
-  routesMap: null,
+  map: null,
+  regionLayer: null,
   nodesLayer: null,
+  ghost: null,
   markers: { start: null, destination: null },
   points: { start: null, destination: null },
   pickMode: "start",
+  step: "pick",
+  calc: null,
+  calcTimer: null,
+  needsFit: false,
   result: null,
   routeLayers: new Map(),
+  routeColors: new Map(),
   selectedRouteId: null,
-  armedRouteId: null,
-  loadingTimer: null,
-  weeklyRecords: [],
-  resultRecorded: false,
+  saved: null,
+  weekly: [],
   user: null,
-  authMode: "login",
   tripsPage: 1,
-  editingTripId: null,
+  drawerTrip: null,
+  pendingDelete: null,
+  toastTimer: null,
+  car: null,
 };
 
-const routeColors = ["#356feb", "#ff7a1a", "#19a956", "#a458ec"];
-const WEEKLY_STORAGE_KEY = "ecoroute-weekly-records-v2";
-const DIESEL_KWH_PER_LITER = 9.8;
-const DIESEL_PRICE_KRW_PER_LITER = 1774;
-const CO2_KG_PER_KWH = 8.887 / 33.7;
-const weekDays = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"];
-const screens = [...document.querySelectorAll(".screen")];
-const RIGHT_CHEVRON = `
-  <span class="button-arrow" aria-hidden="true">
-    <svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"></path></svg>
-  </span>`;
+const $ = (selector, root = document) => root.querySelector(selector);
+const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+const pad2 = (value) => String(value).padStart(2, "0");
+const fmt = (value, digits = 1) => Number(value).toLocaleString("ko-KR", {
+  minimumFractionDigits: digits,
+  maximumFractionDigits: digits,
+});
+const signed = (value, digits = 1) => {
+  const rounded = Number(Math.abs(value).toFixed(digits));
+  if (rounded === 0) return fmt(0, digits);
+  return `${value > 0 ? "+" : "−"}${fmt(rounded, digits)}`;
+};
+const toneOf = (change) => (change < -0.05 ? "good" : change > 0.05 ? "bad" : "base");
+const todayIndex = () => (new Date().getDay() + 6) % 7;
 
-function renderIntroStrokeText(target, options) {
-  const SVG_NS = "http://www.w3.org/2000/svg";
-  const svgNode = (name, attributes = {}) => {
-    const node = document.createElementNS(SVG_NS, name);
-    Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, String(value)));
-    return node;
-  };
-  const addCharacters = (textNode, kind) => {
-    Array.from(options.text).forEach((character) => {
-      const span = svgNode("tspan");
-      span.dataset[kind] = "";
-      span.textContent = character;
-      textNode.appendChild(span);
-    });
-  };
-
-  target.replaceChildren();
-  target.className = "stroke-text";
-  target.setAttribute("role", "img");
-  target.setAttribute("aria-label", options.text);
-  target.style.setProperty("--stroke-text-height", `${Math.round(options.fontSize * 1.3)}px`);
-
-  const svg = svgNode("svg", {
-    class: "stroke-text__svg",
-    viewBox: `0 ${-options.fontSize} 600 ${options.fontSize * 1.3}`,
-    preserveAspectRatio: "xMidYMid meet",
-    "aria-hidden": "true",
-  });
-  const clipId = `intro-text-wipe-${Math.random().toString(36).slice(2, 9)}`;
-  const defs = svgNode("defs");
-  const clipPath = svgNode("clipPath", { id: clipId, clipPathUnits: "userSpaceOnUse" });
-  const wipeRect = svgNode("rect", { x: 0, y: 0, width: 0, height: 0 });
-  clipPath.appendChild(wipeRect);
-  defs.appendChild(clipPath);
-  svg.appendChild(defs);
-
-  const commonTextStyle = (node) => {
-    node.style.fontSize = `${options.fontSize}px`;
-    node.style.fontWeight = String(options.fontWeight);
-    node.style.letterSpacing = `${options.letterSpacing}px`;
-  };
-  const strokeText = svgNode("text", {
-    class: "stroke-text__stroke",
-    x: 0,
-    y: 0,
-    fill: "none",
-    stroke: options.strokeColor,
-    "stroke-width": options.strokeWidth,
-    "stroke-linejoin": "round",
-    "stroke-linecap": "round",
-  });
-  commonTextStyle(strokeText);
-  addCharacters(strokeText, "strokeChar");
-
-  const fillText = svgNode("text", {
-    class: "stroke-text__fill",
-    x: 0,
-    y: 0,
-    fill: options.fillColor,
-    "clip-path": `url(#${clipId})`,
-  });
-  commonTextStyle(fillText);
-  addCharacters(fillText, "fillChar");
-  svg.append(strokeText, fillText);
-  target.appendChild(svg);
-
-  const startAnimation = async () => {
-    if (document.fonts?.ready) {
-      try { await document.fonts.ready; } catch {}
-    }
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-    const bounds = strokeText.getBBox();
-    if (!bounds?.width) return;
-    const padding = Math.max(options.strokeWidth, options.fontSize * .1);
-    const box = {
-      x: bounds.x - padding,
-      y: bounds.y - padding,
-      width: bounds.width + padding * 2,
-      height: bounds.height + padding * 2,
-    };
-    svg.setAttribute("viewBox", `${box.x} ${box.y} ${box.width} ${box.height}`);
-    wipeRect.setAttribute("x", box.x);
-    wipeRect.setAttribute("y", box.y);
-    wipeRect.setAttribute("width", box.width);
-    wipeRect.setAttribute("height", box.height);
-
-    const strokes = [...target.querySelectorAll("[data-stroke-char]")];
-    const dash = Math.max(options.fontSize * 7, 200);
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      strokes.forEach((stroke) => {
-        stroke.style.strokeDasharray = String(dash);
-        stroke.style.strokeDashoffset = "0";
-      });
-      return;
-    }
-
-    strokes.forEach((stroke, index) => {
-      stroke.style.strokeDasharray = String(dash);
-      stroke.style.strokeDashoffset = String(dash);
-      stroke.animate(
-        [{ strokeDashoffset: dash }, { strokeDashoffset: 0 }],
-        {
-          duration: options.drawDuration * 1000,
-          delay: index * options.stagger * 1000,
-          easing: "cubic-bezier(.25,.46,.45,.94)",
-          fill: "forwards",
-        },
-      );
-    });
-    wipeRect.style.transformBox = "fill-box";
-    wipeRect.style.transformOrigin = "left center";
-    wipeRect.animate(
-      [{ transform: "scaleX(0)" }, { transform: "scaleX(1)" }],
-      {
-        duration: Math.max(400, options.drawDuration * 500),
-        delay: (options.drawDuration + options.fillDelay) * 1000,
-        easing: "cubic-bezier(.45,0,.55,1)",
-        fill: "both",
-      },
-    );
-  };
-  startAnimation();
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[char]);
 }
 
-function initializeIntroHero() {
-  const hero = document.querySelector("#intro-hero");
-  const skipButton = document.querySelector("#skip-intro");
-  if (!hero) return;
-  document.body.classList.add("intro-active");
-
-  let dismissed = false;
-  let dismissTimer = null;
-  const dismiss = () => {
-    if (dismissed) return;
-    dismissed = true;
-    window.clearTimeout(dismissTimer);
-    document.body.classList.remove("intro-active");
-    hero.classList.add("leaving");
-    window.setTimeout(() => hero.remove(), 720);
-  };
-
-  const strokeTarget = document.querySelector("#intro-stroke-text");
-  if (strokeTarget) {
-    renderIntroStrokeText(strokeTarget, {
-      text: "ECOROUTE",
-      strokeColor: "#2f80ed",
-      fillColor: "#f5fcff",
-      strokeWidth: 1.6,
-      drawDuration: 1.05,
-      fillDelay: 0.12,
-      stagger: 0.04,
-      fontSize: 132,
-      fontWeight: 850,
-      letterSpacing: -5,
-    });
-  } else {
-    hero.classList.add("intro-fallback");
-  }
-
-  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  dismissTimer = window.setTimeout(dismiss, reducedMotion ? 700 : 2350);
-  skipButton?.addEventListener("click", dismiss, { once: true });
-  hero.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" || event.key === "Enter" || event.key === " ") dismiss();
-  });
-}
-
-function showScreen(id) {
-  screens.forEach((screen) => screen.classList.toggle("active", screen.id === id));
-  if (id === "setup-screen") setTimeout(() => state.setupMap?.invalidateSize(), 80);
-  if (id === "routes-screen") setTimeout(() => state.routesMap?.invalidateSize(), 80);
-}
-
-function fillHours() {
-  const select = document.querySelector("#departure-hour");
-  const currentHour = new Date().getHours();
-  for (let hour = 0; hour < 24; hour += 1) {
-    const option = document.createElement("option");
-    option.value = hour;
-    option.textContent = `${String(hour).padStart(2, "0")}:00`;
-    option.selected = hour === currentHour;
-    select.append(option);
-  }
-}
-
-function fillWeekdays() {
-  const select = document.querySelector("#departure-weekday");
-  weekDays.forEach((day, index) => {
-    const option = document.createElement("option");
-    option.value = index;
-    option.textContent = day;
-    option.selected = index === 0;
-    select.append(option);
-  });
-}
-
-async function api(path, { method = "GET", body } = {}) {
+async function api(path, { method = "GET", body, signal } = {}) {
   const response = await fetch(path, {
     method,
+    signal,
     headers: body ? { "Content-Type": "application/json" } : {},
     body: body ? JSON.stringify(body) : undefined,
   });
   const payload = response.status === 204 ? null : await response.json().catch(() => null);
-  if (!response.ok) throw new Error(payload?.error?.message || `요청에 실패했습니다. (${response.status})`);
+  if (!response.ok) throw new Error(payload?.error?.message || `요청을 처리하지 못했어요. (${response.status})`);
   return payload;
 }
 
-async function loadCurrentUser() {
+/* ── 첫 방문 인트로 (1.2초 이내, 한 번만) ─────────── */
+function playIntro() {
+  let seen = true;
   try {
-    state.user = await api("/api/users/me");
-  } catch {
-    state.user = null;
-  }
-  renderAuthStatus();
-}
+    seen = Boolean(localStorage.getItem(INTRO_KEY));
+    localStorage.setItem(INTRO_KEY, "1");
+  } catch {}
+  if (seen || !canAnimate(anime) || !Motion) return;
 
-function renderAuthStatus() {
-  const userLabel = document.querySelector("#auth-user");
-  userLabel.hidden = !state.user;
-  userLabel.textContent = state.user ? `${state.user.nickname}님` : "";
-  document.querySelector("#auth-button").textContent = state.user ? "로그아웃" : "로그인";
-  document.querySelector("#trips-button").hidden = !state.user;
-}
-
-function setAuthMode(mode) {
-  state.authMode = mode;
-  const signup = mode === "signup";
-  const form = document.querySelector("#auth-form");
-  form.querySelectorAll("[data-auth-mode]").forEach((button) => {
-    button.classList.toggle("active", button.dataset.authMode === mode);
-    button.setAttribute("aria-pressed", String(button.dataset.authMode === mode));
-  });
-  form.querySelectorAll("[data-signup-only]").forEach((field) => {
-    field.hidden = !signup;
-    field.querySelector("input").required = signup;
-  });
-  form.elements.password.autocomplete = signup ? "new-password" : "current-password";
-  document.querySelector("#auth-title").textContent = signup ? "회원가입" : "로그인";
-  document.querySelector("#auth-submit").textContent = signup ? "가입하기" : "로그인";
-  document.querySelector("#auth-error").textContent = "";
-}
-
-function bindAuthEvents() {
-  const form = document.querySelector("#auth-form");
-  document.querySelector("#auth-button").addEventListener("click", async () => {
-    if (!state.user) {
-      setAuthMode("login");
-      showScreen("auth-screen");
-      form.elements.username.focus();
-      return;
-    }
-    try {
-      await api("/api/sessions/current", { method: "DELETE" });
-    } finally {
-      state.user = null;
-      state.weeklyRecords = loadWeeklyRecords();
-      renderAuthStatus();
-      if (document.querySelector("#trips-screen").classList.contains("active")) showScreen("setup-screen");
-    }
-  });
-  form.querySelectorAll("[data-auth-mode]").forEach((button) => {
-    button.addEventListener("click", () => setAuthMode(button.dataset.authMode));
-  });
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const { username, password, nickname } = Object.fromEntries(new FormData(form));
-    const submit = document.querySelector("#auth-submit");
-    submit.disabled = true;
-    try {
-      state.user = state.authMode === "signup"
-        ? await api("/api/users", { method: "POST", body: { username, password, nickname } })
-        : (await api("/api/sessions", { method: "POST", body: { username, password } })).user;
-      form.reset();
-      renderAuthStatus();
-      showScreen("setup-screen");
-    } catch (error) {
-      document.querySelector("#auth-error").textContent = error.message;
-    } finally {
-      submit.disabled = false;
-    }
-  });
-}
-
-function bindAccountEvents() {
-  const dialog = document.querySelector("#account-dialog");
-  const message = document.querySelector("#account-message");
-  const nicknameForm = document.querySelector("#nickname-form");
-  const passwordForm = document.querySelector("#password-form");
-  const deleteForm = document.querySelector("#delete-account-form");
-  const showMessage = (text, ok = false) => {
-    message.textContent = text;
-    message.classList.toggle("ok", ok);
+  const intro = $("#intro");
+  intro.hidden = false;
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    Motion.animate(intro, { opacity: 0 }, { duration: 0.26 }).then(() => intro.remove());
   };
-
-  document.querySelector("#auth-user").addEventListener("click", () => {
-    document.querySelector("#account-username").textContent = `아이디: ${state.user.username}`;
-    nicknameForm.elements.nickname.value = state.user.nickname;
-    passwordForm.reset();
-    deleteForm.reset();
-    showMessage("");
-    dialog.showModal();
-  });
-  document.querySelector("#account-close").addEventListener("click", () => dialog.close());
-
-  nicknameForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    try {
-      state.user = await api("/api/users/me", {
-        method: "PATCH",
-        body: { nickname: nicknameForm.elements.nickname.value },
-      });
-      renderAuthStatus();
-      showMessage("닉네임을 변경했어요.", true);
-    } catch (error) {
-      showMessage(error.message);
-    }
-  });
-
-  passwordForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    try {
-      await api("/api/users/me", { method: "PATCH", body: Object.fromEntries(new FormData(passwordForm)) });
-      passwordForm.reset();
-      showMessage("비밀번호를 변경했어요. 다른 기기에서는 로그아웃됩니다.", true);
-    } catch (error) {
-      showMessage(error.message);
-    }
-  });
-
-  deleteForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    if (!window.confirm("정말 탈퇴할까요? 모든 주행 기록이 삭제되며 되돌릴 수 없습니다.")) return;
-    try {
-      await api("/api/users/me", { method: "DELETE", body: Object.fromEntries(new FormData(deleteForm)) });
-      dialog.close();
-      state.user = null;
-      state.weeklyRecords = loadWeeklyRecords();
-      renderAuthStatus();
-      resetDemo();
-    } catch (error) {
-      showMessage(error.message);
-    }
-  });
+  const road = anime.svg.createDrawable(".intro-road path");
+  anime.animate(road, { draw: ["0 0", "0 1"], duration: 700, ease: "outExpo" });
+  Motion.animate(".intro-mark", { opacity: [0, 1], y: [10, 0] }, { type: "spring", stiffness: 260, damping: 26 });
+  setTimeout(finish, 900);
+  intro.addEventListener("click", finish, { once: true });
+  window.addEventListener("keydown", finish, { once: true });
 }
 
-async function initialize() {
-  bindAuthEvents();
-  bindAccountEvents();
-  bindTripEvents();
-  loadCurrentUser();
-  fillHours();
-  fillWeekdays();
-  state.weeklyRecords = loadWeeklyRecords();
-  try {
-    const { items } = await api("/api/regions");
-    const defaultRegion = items.find((region) => region.is_default) || items[0];
-    state.config = await api(`/api/regions/${encodeURIComponent(defaultRegion.key)}`);
-    renderRegionSelector();
-    initializeSetupMap();
-    bindEvents();
-  } catch (error) {
-    document.querySelector("#setup-error").textContent = error.message;
+/* ── 상단 탭 / 화면 전환 ──────────────────────────── */
+function currentView() {
+  const view = location.hash.slice(1);
+  return VIEWS.includes(view) ? view : "plan";
+}
+
+function renderView() {
+  const view = currentView();
+  VIEWS.forEach((name) => { $(`#view-${name}`).hidden = name !== view; });
+  $$(".tabs a").forEach((link) => {
+    if (link.dataset.tab === view) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+  moveTabIndicator();
+  if (view === "plan") {
+    setTimeout(() => {
+      state.map?.invalidateSize();
+      if (state.needsFit) fitRegion();
+    }, 0);
   }
+  if (view === "weekly") showWeekly();
+  if (view === "trips") showTrips();
 }
 
-function renderRegionSelector() {
-  const selector = document.querySelector("#region-selector");
-  selector.innerHTML = state.config.regions.map((region) => `
-    <button class="region-button${region.key === state.config.region ? " active" : ""}"
-      type="button" data-region="${region.key}"
-      aria-pressed="${region.key === state.config.region}">${region.short_label}</button>`).join("");
-  selector.querySelectorAll(".region-button").forEach((button) => {
-    button.addEventListener("click", () => selectRegion(button.dataset.region));
-  });
-}
-
-async function selectRegion(regionKey) {
-  if (regionKey === state.config.region) return;
-  const selector = document.querySelector("#region-selector");
-  selector.querySelectorAll("button").forEach((button) => { button.disabled = true; });
-  document.querySelector("#setup-error").textContent = "지도를 전환하고 있어요...";
-  try {
-    const payload = await api(`/api/regions/${encodeURIComponent(regionKey)}`);
-    clearPoint("start");
-    clearPoint("destination");
-    if (state.setupMap) state.setupMap.remove();
-    state.setupMap = null;
-    state.nodesLayer = null;
-    state.markers = { start: null, destination: null };
-    state.config = payload;
-    renderRegionSelector();
-    initializeSetupMap();
-    document.querySelector("#start-field strong").textContent = "지도에서 출발 노드를 선택하세요";
-    document.querySelector("#destination-field strong").textContent = "지도에서 도착 노드를 선택하세요";
-    setPickMode("start");
-    updateSubmitState();
-    document.querySelector("#setup-error").textContent = "";
-  } catch (error) {
-    document.querySelector("#setup-error").textContent = error.message;
-    renderRegionSelector();
+function moveTabIndicator(instant = false) {
+  const indicator = $(".tab-indicator");
+  const active = $(".tabs a[aria-current='page']");
+  if (!active || getComputedStyle(indicator).display === "none") return;
+  const target = { x: active.offsetLeft, width: active.offsetWidth };
+  if (!Motion) {
+    indicator.style.transform = `translateX(${target.x}px)`;
+    indicator.style.width = `${target.width}px`;
+    return;
   }
+  const first = !indicator.style.width;
+  Motion.animate(indicator, target, instant || first || reduceMotion
+    ? { duration: 0 }
+    : { type: "spring", stiffness: 500, damping: 30 });
 }
 
-function tileLayer() {
-  return L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+/* ── 지도 ─────────────────────────────────────────── */
+function initMap() {
+  state.map = L.map("map", { zoomControl: false, maxZoom: 17, zoomSnap: 0.5 });
+  L.control.zoom({ position: "bottomright" }).addTo(state.map);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: "&copy; OpenStreetMap contributors",
-  });
+  }).addTo(state.map);
+  state.map.on("click", onMapClick);
+  state.map.on("mousemove", onMapHover);
+  state.map.on("mouseout", hideGhost);
+  state.map.on("zoomend", restartCarAfterZoom);
 }
 
-function initializeSetupMap() {
-  const { nodes } = state.config;
-  const selectionBounds = boundsFromConfig();
-  state.setupMap = L.map("setup-map", {
-    zoomControl: false,
-    preferCanvas: true,
-    maxBounds: selectionBounds.pad(.50),
-    maxBoundsViscosity: 0.3,
-    maxZoom: 17,
-  });
-  tileLayer().addTo(state.setupMap);
-  addCoverageFrame(state.setupMap, selectionBounds);
-  const sharedRenderer = L.canvas({ padding: .35 });
-  state.nodesLayer = L.layerGroup();
-  nodes.forEach((node) => {
-    L.circleMarker([node.lat, node.lon], {
-      renderer: sharedRenderer,
-      radius: 4,
-      weight: 1.5,
-      color: "#ffffff",
-      fillColor: "#269fde",
-      fillOpacity: .78,
-      interactive: false,
-    }).addTo(state.nodesLayer);
-  });
-  state.nodesLayer.addTo(state.setupMap);
-  state.setupMap.fitBounds(selectionBounds, { padding: [24, 24] });
-  state.setupMap.setMinZoom(state.setupMap.getZoom());
-  state.setupMap.on("click", ({ latlng }) => {
-    if (selectionBounds.contains(latlng)) selectNearestNode(latlng);
-    else showTemporaryMapHint("선택 가능한 사각형 안을 눌러 주세요");
-  });
-}
-
-function boundsFromConfig() {
+function regionBounds() {
   const bounds = state.config.selectable_bounds;
   return L.latLngBounds([bounds.south, bounds.west], [bounds.north, bounds.east]);
 }
 
-function addCoverageFrame(map, bounds) {
-  const south = bounds.getSouth();
-  const west = bounds.getWest();
-  const north = bounds.getNorth();
-  const east = bounds.getEast();
+function loadRegion(config) {
+  state.config = config;
+  state.regionLayer?.remove();
+  state.nodesLayer?.remove();
+  const bounds = regionBounds();
+  const [south, west, north, east] = [bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast()];
   const pad = 3;
-  const maskStyle = {
+  const mask = { stroke: false, fillColor: "#ffffff", fillOpacity: 0.72, interactive: false };
+  state.regionLayer = L.layerGroup([
+    L.rectangle([[south - pad, west - pad], [south, east + pad]], mask),
+    L.rectangle([[north, west - pad], [north + pad, east + pad]], mask),
+    L.rectangle([[south, west - pad], [north, west]], mask),
+    L.rectangle([[south, east], [north, east + pad]], mask),
+    L.rectangle(bounds, { color: "#16202a", weight: 1.5, opacity: 0.45, dashArray: "6 6", fill: false, interactive: false }),
+  ]).addTo(state.map);
+
+  const renderer = L.canvas({ padding: 0.35 });
+  state.nodesLayer = L.layerGroup(config.nodes.map((node) => L.circleMarker([node.lat, node.lon], {
+    renderer,
+    radius: 3,
     stroke: false,
-    fillColor: "#dceef8",
-    fillOpacity: .82,
+    fillColor: "#16202a",
+    fillOpacity: 0.32,
     interactive: false,
-  };
-  [
-    [[south - pad, west - pad], [south, east + pad]],
-    [[north, west - pad], [north + pad, east + pad]],
-    [[south, west - pad], [north, west]],
-    [[south, east], [north, east + pad]],
-  ].forEach((rectangle) => L.rectangle(rectangle, maskStyle).addTo(map));
-  L.rectangle(bounds, {
-    color: "#238bc5",
-    weight: 2,
-    opacity: .8,
-    fill: false,
-    interactive: false,
-    dashArray: "7 6",
-  }).addTo(map);
+  })));
+  if (state.step === "pick") state.nodesLayer.addTo(state.map);
+  const region = config.regions.find((item) => item.key === config.region);
+  $("#map-caption").textContent = `점선 안의 ${region?.short_label || ""} 도로에서 고를 수 있어요`;
+  state.map.setMaxBounds(bounds.pad(2));
+  state.map.setView([config.center.lat, config.center.lon], 13, { animate: false });
+  fitRegion();
 }
 
-function showTemporaryMapHint(message) {
-  document.querySelector("#setup-error").textContent = message;
-  window.setTimeout(() => {
-    if (document.querySelector("#setup-error").textContent === message) {
-      document.querySelector("#setup-error").textContent = "";
-    }
-  }, 1500);
+// 지도가 숨겨진 화면(주간 리포트 등)에서 맞추면 크기 0 기준으로 줌이 잠기므로, 보일 때까지 미룬다.
+function fitRegion() {
+  const container = state.map.getContainer();
+  if (!container.clientWidth || !container.clientHeight) {
+    state.needsFit = true;
+    return;
+  }
+  state.needsFit = false;
+  state.map.setMinZoom(0);
+  // 애니메이션 중에는 getZoom()이 이전 값이라 최소 줌이 잘못 잠기므로 즉시 맞춘다.
+  state.map.fitBounds(regionBounds(), { ...fitOptions(24), animate: false });
+  state.map.setMinZoom(state.map.getZoom() - 0.5);
+}
+
+// 패널이 지도 위에 떠 있으므로(데스크톱은 왼쪽, 모바일은 아래) 그만큼 비워 두고 맞춘다.
+function fitOptions(pad) {
+  const panel = $("#panel");
+  return matchMedia("(max-width: 760px)").matches
+    ? { paddingTopLeft: [pad, pad], paddingBottomRight: [pad, pad + panel.offsetHeight] }
+    : { paddingTopLeft: [pad + panel.offsetLeft + panel.offsetWidth, pad], paddingBottomRight: [pad, pad] };
 }
 
 function nearestNode(latlng) {
@@ -530,11 +240,76 @@ function nearestNode(latlng) {
   return nearest;
 }
 
-function selectNearestNode(latlng) {
+function nodeLabel(node) {
+  if (state.config.region === "ann_arbor" && node.place_label) return node.place_label;
+  return `지점 ${node.lat.toFixed(4)}, ${node.lon.toFixed(4)}`;
+}
+
+function pinIcon(kind) {
+  const size = kind === "ghost" ? 16 : 20;
+  return L.divIcon({
+    className: "",
+    html: `<span class="pin pin-${kind}"></span>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+}
+
+function showMapHint(message) {
+  const map = $("#map");
+  $(".map-hint", map)?.remove();
+  const hint = document.createElement("div");
+  hint.className = "map-hint";
+  hint.textContent = message;
+  map.append(hint);
+  setTimeout(() => hint.remove(), 1600);
+}
+
+function onMapClick({ latlng }) {
+  if (state.step !== "pick" || !state.config) return;
+  if (!regionBounds().contains(latlng)) {
+    showMapHint("점선 사각형 안을 눌러 주세요");
+    return;
+  }
   const node = nearestNode(latlng);
-  if (!node) return;
+  if (node) pickNode(node);
+}
+
+let hoverFrame = 0;
+function onMapHover({ latlng }) {
+  if (state.step !== "pick" || !state.config || !matchMedia("(pointer: fine)").matches) return;
+  cancelAnimationFrame(hoverFrame);
+  hoverFrame = requestAnimationFrame(() => {
+    const node = regionBounds().contains(latlng) && nearestNode(latlng);
+    if (!node) {
+      hideGhost();
+      return;
+    }
+    const text = `${state.pickMode === "start" ? "출발" : "도착"}: ${escapeHtml(nodeLabel(node))}`;
+    if (!state.ghost) {
+      state.ghost = L.marker([node.lat, node.lon], { icon: pinIcon("ghost"), interactive: false, keyboard: false })
+        .bindTooltip(text, { direction: "top", offset: [0, -10], className: "map-tip ghost" })
+        .addTo(state.map);
+    }
+    state.ghost.setLatLng([node.lat, node.lon]);
+    state.ghost.setTooltipContent(text);
+    state.ghost.openTooltip();
+  });
+}
+
+function hideGhost() {
+  cancelAnimationFrame(hoverFrame);
+  state.ghost?.remove();
+  state.ghost = null;
+}
+
+/* ── D1 지점 고르기 ───────────────────────────────── */
+function pickNode(node) {
   setPoint(state.pickMode, node);
   if (state.pickMode === "start" && !state.points.destination) setPickMode("destination");
+  else if (state.pickMode === "destination" && !state.points.start) setPickMode("start");
+  hideGhost();
+  renderGuide();
 }
 
 function setPoint(kind, node) {
@@ -542,289 +317,569 @@ function setPoint(kind, node) {
     node_id: node.id,
     lat: node.lat,
     lon: node.lon,
+    label: nodeLabel(node),
     ...(node.place_label ? { place_label: node.place_label } : {}),
   };
-  if (state.markers[kind]) state.setupMap.removeLayer(state.markers[kind]);
-  const isStart = kind === "start";
-  state.markers[kind] = L.circleMarker([node.lat, node.lon], {
-    radius: 9, color: "#fff", weight: 3,
-    fillColor: isStart ? "#22b6e8" : "#ff5961", fillOpacity: 1,
-  }).addTo(state.setupMap).bindTooltip(isStart ? "출발" : "도착", {
-    permanent: true, direction: "top", offset: [0, -8], className: "node-tooltip",
-  });
-  const field = document.querySelector(`#${kind === "start" ? "start" : "destination"}-field strong`);
-  const coordinates = `Node ${node.id} · ${node.lat.toFixed(5)}, ${node.lon.toFixed(5)}`;
-  const usePlaceLabel = state.config.region === "ann_arbor" && node.place_label;
-  field.textContent = usePlaceLabel ? node.place_label : coordinates;
-  field.title = usePlaceLabel ? coordinates : "";
-  updateSubmitState();
-}
-
-function setPickMode(kind) {
-  state.pickMode = kind;
-  document.querySelectorAll(".location-field").forEach((field) => {
-    field.classList.toggle("active", field.dataset.pick === kind);
-  });
-}
-
-function updateSubmitState() {
-  document.querySelector("#find-routes").disabled = !(state.points.start && state.points.destination);
-}
-
-function bindEvents() {
-  document.querySelectorAll("[data-pick]").forEach((button) => {
-    button.addEventListener("click", () => setPickMode(button.dataset.pick));
-  });
-  document.querySelector("#swap-locations").addEventListener("click", swapLocations);
-  document.querySelectorAll("input[name='vehicle']").forEach((input) => {
-    input.addEventListener("change", () => {
-      document.querySelectorAll(".vehicle-card").forEach((card) => card.classList.remove("selected"));
-      input.closest(".vehicle-card").classList.add("selected");
-    });
-  });
-  document.querySelector("#find-routes").addEventListener("click", calculateRoutes);
-  document.querySelector("#view-weekly").addEventListener("click", showWeeklyReport);
-  document.querySelector("#weekly-back").addEventListener("click", () => showScreen("impact-screen"));
-  document.querySelectorAll("[data-go-home]").forEach((button) => button.addEventListener("click", resetDemo));
-}
-
-function swapLocations() {
-  const start = state.points.start;
-  const destination = state.points.destination;
-  if (!start && !destination) return;
-  if (start) setPoint("destination", start);
-  else clearPoint("destination");
-  if (destination) setPoint("start", destination);
-  else clearPoint("start");
+  state.markers[kind]?.remove();
+  state.markers[kind] = L.marker([node.lat, node.lon], {
+    icon: pinIcon(kind === "start" ? "start" : "end"),
+    keyboard: false,
+    interactive: false,
+  }).bindTooltip(kind === "start" ? "출발" : "도착", {
+    permanent: true, direction: "top", offset: [0, -12], className: "map-tip",
+  }).addTo(state.map);
+  renderStops();
 }
 
 function clearPoint(kind) {
   state.points[kind] = null;
-  if (state.markers[kind]) state.setupMap.removeLayer(state.markers[kind]);
+  state.markers[kind]?.remove();
   state.markers[kind] = null;
 }
 
-function startLoadingMessages() {
-  const steps = [
-    "24시간 교통 프로필을 불러오고 있어요",
-    "다익스트라 기반 후보 경로를 비교하고 있어요",
-    "도로를 250m 구간으로 나누고 있어요",
-    "DNN이 에너지와 탄소 배출량을 추정하고 있어요",
-  ];
+function setPickMode(kind) {
+  state.pickMode = kind;
+  $$(".stop").forEach((stop) => stop.classList.toggle("active", stop.dataset.pick === kind));
+  renderGuide();
+}
+
+function renderStops() {
+  ["start", "destination"].forEach((kind) => {
+    const label = $(`#stop-${kind} strong`);
+    const point = state.points[kind];
+    label.textContent = point ? point.label : "지도에서 선택";
+    label.classList.toggle("placeholder", !point);
+    label.title = point ? `${point.lat.toFixed(5)}, ${point.lon.toFixed(5)}` : "";
+  });
+  $$("#suggestion-chips .chip").forEach((chip) => {
+    const picked = Object.values(state.points).some((point) => point?.node_id === chip.dataset.node);
+    chip.setAttribute("aria-pressed", String(picked));
+  });
+  const { start, destination } = state.points;
+  $("#find-routes").disabled = !(start && destination);
+  $("#cta-hint").textContent = start && destination
+    ? ""
+    : `${start ? "도착지" : destination ? "출발지" : "출발지와 도착지"}를 고르면 비교할 수 있어요`;
+}
+
+function renderGuide() {
+  const guide = $("#pick-guide");
+  const ready = Boolean(state.points.start && state.points.destination);
+  guide.classList.toggle("ready", ready);
+  $("b", guide).textContent = ready ? "✓" : state.pickMode === "start" ? "1" : "2";
+  $("span", guide).textContent = ready
+    ? "준비됐어요. 바꿀 칸을 누르고 지도를 다시 눌러도 돼요"
+    : state.pickMode === "start"
+      ? "지도에서 출발지를 눌러 주세요"
+      : "이제 도착지를 눌러 주세요";
+}
+
+function swapStops() {
+  const { start, destination } = state.points;
+  if (!start && !destination) return;
+  const byId = (point) => point && state.config.nodes.find((node) => node.id === point.node_id);
+  const [newStart, newDestination] = [byId(destination), byId(start)];
+  clearPoint("start");
+  clearPoint("destination");
+  if (newStart) setPoint("start", newStart);
+  if (newDestination) setPoint("destination", newDestination);
+  renderStops();
+  setPickMode(!state.points.start ? "start" : "destination");
+}
+
+function renderSuggestions() {
+  const nodes = state.config.region === "ann_arbor"
+    ? SUGGESTED_PLACES
+      .map((label) => state.config.nodes.find((node) => node.place_label === label))
+      .filter(Boolean)
+    : [];
+  $("#suggestions").hidden = nodes.length === 0;
+  $("#suggestion-chips").innerHTML = nodes.map((node) => `
+    <button class="chip" type="button" data-node="${escapeHtml(node.id)}" aria-pressed="false">${escapeHtml(node.place_label)}</button>`).join("");
+}
+
+function fillConditions() {
+  const now = new Date();
+  $("#weekday").innerHTML = WEEK.map((day, index) => `
+    <option value="${index}"${index === todayIndex() ? " selected" : ""}>${day}요일</option>`).join("");
+  $("#hour").innerHTML = Array.from({ length: 24 }, (_, hour) => `
+    <option value="${hour}"${hour === now.getHours() ? " selected" : ""}>${pad2(hour)}:00</option>`).join("");
+}
+
+function conditions() {
+  return {
+    hour: Number($("#hour").value),
+    weekday: Number($("#weekday").value),
+    vehicle: $("input[name='vehicle']:checked").value,
+  };
+}
+
+function renderConditions() {
+  const { hour, weekday, vehicle } = conditions();
+  const isNow = hour === new Date().getHours() && weekday === todayIndex();
+  const region = state.config?.regions.find((item) => item.key === state.config.region);
+  $("#conditions-summary").innerHTML = [
+    isNow ? '<span class="now">지금 출발</span>' : "",
+    `<span>${WEEK[weekday]}요일 ${pad2(hour)}:00</span>`,
+    `<span>${VEHICLE_LABELS[vehicle]}</span>`,
+    region ? `<span>${escapeHtml(region.short_label)}</span>` : "",
+  ].join("");
+}
+
+function renderRegionOptions() {
+  $("#region-options").innerHTML = state.config.regions.map((region) => `
+    <label><input type="radio" name="region" value="${escapeHtml(region.key)}"${region.key === state.config.region ? " checked" : ""}>
+    <span>${escapeHtml(region.short_label)}</span></label>`).join("");
+}
+
+async function switchRegion(key) {
+  if (key === state.config.region) return;
+  const inputs = $$("input[name='region']");
+  inputs.forEach((input) => { input.disabled = true; });
+  $("#pick-error").textContent = "";
+  try {
+    const config = await api(`/api/regions/${encodeURIComponent(key)}`);
+    clearPoint("start");
+    clearPoint("destination");
+    loadRegion(config);
+    renderRegionOptions();
+    renderSuggestions();
+    renderStops();
+    setPickMode("start");
+    renderConditions();
+  } catch (error) {
+    $("#pick-error").textContent = error.message;
+    renderRegionOptions();
+  }
+}
+
+/* ── 패널 단계 전환 ───────────────────────────────── */
+function setStep(step, { animate = true } = {}) {
+  state.step = step;
+  $$(".step").forEach((element) => { element.hidden = element.dataset.step !== step; });
+  const panel = $("#panel");
+  panel.classList.remove("collapsed");
+  $("#sheet-handle").setAttribute("aria-expanded", "true");
+  $("#map").classList.toggle("picking", step === "pick");
+  $("#map-caption").hidden = step !== "pick";
+  if (step === "pick") {
+    clearRoutes();
+    state.nodesLayer?.addTo(state.map);
+  } else {
+    state.nodesLayer?.remove();
+    hideGhost();
+  }
+  const current = $(`.step[data-step="${step}"]`);
+  $(".step-body", current).scrollTop = 0;
+  if (animate && canAnimate(Motion)) {
+    Motion.animate(current, { opacity: [0, 1], x: [14, 0] }, { type: "spring", stiffness: 260, damping: 26 });
+  }
+}
+
+/* ── D2 계산 중 ───────────────────────────────────── */
+function startCalcProgress() {
+  const items = $$("#calc-steps li");
   let index = 0;
-  document.querySelector("#loading-step").textContent = steps[index];
-  state.loadingTimer = setInterval(() => {
-    index = (index + 1) % steps.length;
-    document.querySelector("#loading-step").textContent = steps[index];
-  }, 2100);
+  const paint = () => items.forEach((item, i) => {
+    item.classList.toggle("done", i < index);
+    item.classList.toggle("active", i === index);
+  });
+  paint();
+  state.calcTimer = setInterval(() => {
+    if (index < items.length - 1) index += 1;
+    paint();
+  }, 1400);
+}
+
+function stopCalcProgress(complete) {
+  clearInterval(state.calcTimer);
+  if (complete) $$("#calc-steps li").forEach((item) => { item.classList.remove("active"); item.classList.add("done"); });
 }
 
 async function calculateRoutes() {
-  document.querySelector("#setup-error").textContent = "";
-  showScreen("loading-screen");
-  startLoadingMessages();
-  const vehicle = document.querySelector("input[name='vehicle']:checked").value;
-  const hour = Number(document.querySelector("#departure-hour").value);
-  const weekday = Number(document.querySelector("#departure-weekday").value);
+  if (!(state.points.start && state.points.destination)) return;
+  $("#pick-error").textContent = "";
+  setStep("calc");
+  startCalcProgress();
+  const controller = new AbortController();
+  state.calc = controller;
+  const strip = ({ node_id: nodeId, lat, lon }) => ({ node_id: nodeId, lat, lon });
   try {
-    state.result = await api("/api/route-calculations", {
+    const result = await api("/api/route-calculations", {
       method: "POST",
+      signal: controller.signal,
       body: {
         region: state.config.region,
-        start: state.points.start,
-        destination: state.points.destination,
-        hour,
-        weekday,
-        vehicle,
+        start: strip(state.points.start),
+        destination: strip(state.points.destination),
+        ...conditions(),
       },
     });
-    state.resultRecorded = false;
-    showScreen("routes-screen");
-    renderRouteResults();
+    stopCalcProgress(true);
+    await new Promise((resolve) => setTimeout(resolve, reduceMotion ? 0 : 220));
+    if (controller.signal.aborted) return;
+    state.result = result;
+    state.saved = null;
+    showCompare();
   } catch (error) {
-    document.querySelector("#setup-error").textContent = error.message;
-    showScreen("setup-screen");
+    stopCalcProgress(false);
+    if (controller.signal.aborted) return;
+    setStep("pick");
+    $("#pick-error").textContent = error.message;
   } finally {
-    clearInterval(state.loadingTimer);
+    if (state.calc === controller) state.calc = null;
   }
+}
+
+function cancelCalculation() {
+  state.calc?.abort();
+  stopCalcProgress(false);
+  setStep("pick");
+}
+
+/* ── D3 경로 비교 ─────────────────────────────────── */
+function fastestRoute(routes) {
+  return routes.find((route) => route.is_fastest_route)
+    || [...routes].sort((a, b) => a.traffic_travel_time_min - b.traffic_travel_time_min)[0];
 }
 
 function orderedRoutes(routes) {
   const eco = routes.find((route) => route.is_greenest_route);
-  const fastest = routes.find((route) => route.is_fastest_route && route.route_id !== eco?.route_id);
-  const selected = [eco, fastest].filter(Boolean);
-  const rest = routes
-    .filter((route) => !selected.some((item) => item.route_id === route.route_id))
-    .sort((a, b) => a.total_co2_kg - b.total_co2_kg);
-  return [...selected, ...rest];
+  const fastest = fastestRoute(routes);
+  const head = [eco, fastest].filter((route, index, list) => route && list.indexOf(route) === index);
+  const rest = routes.filter((route) => !head.includes(route)).sort((a, b) => a.total_co2_kg - b.total_co2_kg);
+  return [...head, ...rest];
 }
 
-function renderRouteResults() {
-  if (state.routesMap) state.routesMap.remove();
-  const { center } = state.config;
-  const selectionBounds = boundsFromConfig();
-  state.routesMap = L.map("routes-map", {
-    zoomControl: false,
-    maxBounds: selectionBounds.pad(.08),
-    maxBoundsViscosity: 1,
-    maxZoom: 17,
-  }).setView([center.lat, center.lon], 13);
-  tileLayer().addTo(state.routesMap);
+function routeName(route) {
+  if (route.is_greenest_route && route.is_fastest_route) return "저탄소·최단 시간 경로";
+  if (route.is_greenest_route) return "저탄소 경로";
+  if (route.is_fastest_route) return "가장 빠른 경로";
+  return `대안 경로 ${String(route.route_id).split("_").pop()}`;
+}
+
+function co2Change(route, fastest) {
+  return fastest.total_co2_kg > 0 ? (route.total_co2_kg / fastest.total_co2_kg - 1) * 100 : 0;
+}
+
+function clearRoutes() {
+  stopCar();
+  state.routeLayers.forEach(({ casing, line, tip }) => { casing.remove(); line.remove(); tip?.remove(); });
   state.routeLayers.clear();
+}
 
-  const summaryById = new Map(state.result.routes.map((route) => [route.route_id, route]));
-  const bounds = [];
-  state.result.geojson.features.forEach((feature, index) => {
-    const route = summaryById.get(feature.properties.route_id);
-    const layer = L.geoJSON(feature, {
-      style: { color: routeColors[index], weight: 5, opacity: .75, lineCap: "round", lineJoin: "round" },
-    }).addTo(state.routesMap);
-    layer.on("click", () => selectRoute(route.route_id, false));
-    state.routeLayers.set(route.route_id, layer);
-    bounds.push(layer.getBounds());
+function routeElements(routeId) {
+  const { casing, line } = state.routeLayers.get(routeId);
+  return [casing, line].flatMap((group) => group.getLayers().map((layer) => layer.getElement())).filter(Boolean);
+}
+
+function showCompare({ returning = false } = {}) {
+  const { routes, geojson } = state.result;
+  clearRoutes();
+  const fastest = fastestRoute(routes);
+  const ordered = orderedRoutes(routes);
+  let alt = 0;
+  state.routeColors = new Map(ordered.map((route) => [route.route_id,
+    route.is_greenest_route ? ECO_COLOR
+      : route === fastest ? FAST_COLOR
+        : ALT_COLORS[alt++ % ALT_COLORS.length]]));
+
+  setStep("compare");
+  const featureById = new Map(geojson.features.map((feature) => [feature.properties.route_id, feature]));
+  const bounds = L.latLngBounds([]);
+  [...ordered].reverse().forEach((route) => {
+    const feature = featureById.get(route.route_id);
+    if (!feature) return;
+    const style = { lineCap: "round", lineJoin: "round" };
+    const casing = L.geoJSON(feature, { style: { ...style, color: "#ffffff", weight: 9, opacity: 0.85 }, interactive: false }).addTo(state.map);
+    const line = L.geoJSON(feature, { style: { ...style, color: state.routeColors.get(route.route_id), weight: 5, opacity: 0.9 } }).addTo(state.map);
+    // 경로가 구간별 MultiLineString이라 Leaflet 기본 중심은 첫 구간에 붙는다. 전체 좌표의 가운데에 단다.
+    const points = line.getLayers().flatMap((layer) => layer.getLatLngs().flat(Infinity));
+    // 선 위가 아니라 옆에 달아야 달리는 차를 가리지 않는다.
+    const tip = points.length ? L.tooltip({ permanent: true, direction: "right", offset: [10, 0], className: "route-tip" })
+      .setLatLng(points[Math.floor(points.length / 2)])
+      .setContent(`${fmt(route.traffic_travel_time_min, 0)}분`)
+      .addTo(state.map) : null;
+    line.on("click", () => {
+      const input = $(`#route-list input[value="${CSS.escape(String(route.route_id))}"]`);
+      if (input) { input.checked = true; selectRoute(route.route_id); }
+    });
+    state.routeLayers.set(route.route_id, { casing, line, tip });
+    bounds.extend(line.getBounds());
   });
-  if (bounds.length) {
-    const merged = bounds.slice(1).reduce((result, bound) => result.extend(bound), bounds[0]);
-    state.routesMap.fitBounds(merged, { padding: [35, 35] });
-  }
 
-  const routes = orderedRoutes(state.result.routes);
-  document.querySelector("#trip-summary").innerHTML = `
-    <strong>${state.result.vehicle.label}</strong><span class="dot">•</span>
-    <span>${weekDays[state.result.weekday]} · ${String(state.result.hour).padStart(2, "0")}:00 출발</span><span class="dot">•</span>
-    <span>경로 ${routes.length}개 분석 완료</span>`;
-  document.querySelector("#route-list").innerHTML = routes.map(routeCardHtml).join("");
-  document.querySelectorAll(".route-card").forEach((card) => {
-    card.addEventListener("click", () => {
-      const repeat = state.armedRouteId === card.dataset.routeId;
-      if (repeat) showImpact(card.dataset.routeId);
-      else {
-        selectRoute(card.dataset.routeId, true);
-        state.armedRouteId = card.dataset.routeId;
-      }
+  const { vehicle, weekday, hour } = state.result;
+  $("#compare-title").textContent = ordered.length > 1 ? `경로 ${ordered.length}개를 비교했어요` : "경로를 찾았어요";
+  $("#compare-meta").textContent = `${vehicle.label}로 ${WEEK[weekday]}요일 ${pad2(hour)}:00에 출발할 때`;
+  const maxRelative = Math.max(100, ...ordered.map((route) => 100 + co2Change(route, fastest))) * 1.04;
+  $("#route-list").innerHTML = ordered.map((route) => routeItemHtml(route, fastest, maxRelative)).join("");
+  $$("#route-list input").forEach((input) => input.addEventListener("change", () => selectRoute(input.value)));
+
+  const keep = returning && ordered.some((route) => String(route.route_id) === state.selectedRouteId);
+  const first = keep ? state.selectedRouteId : String(ordered[0].route_id);
+  $(`#route-list input[value="${CSS.escape(first)}"]`).checked = true;
+  // 처음 보여 줄 때는 경로 드로잉(최대 약 1.35초)이 끝난 뒤 차를 출발시킨다.
+  selectRoute(first, returning ? 0 : 1300);
+  // 목록을 채운 뒤 맞춰야 모바일 시트 높이가 반영된다.
+  if (bounds.isValid()) state.map.fitBounds(bounds, fitOptions(48));
+  if (!returning) animateCompare(ordered);
+}
+
+function routeItemHtml(route, fastest, maxRelative) {
+  const isFastest = route === fastest;
+  const change = co2Change(route, fastest);
+  const tone = isFastest ? "base" : toneOf(change);
+  const minutes = route.traffic_travel_time_min - fastest.traffic_travel_time_min;
+  const timeText = isFastest ? "가장 빠름" : Math.abs(minutes) < 0.5 ? "같은 시간" : `${signed(minutes, 0)}분`;
+  const relative = 100 + change;
+  const tag = route.is_greenest_route ? '<span class="tag tag-eco">추천</span>' : "";
+  return `<label class="route" style="--route-color:${state.routeColors.get(route.route_id)}">
+    <input type="radio" name="route" value="${escapeHtml(route.route_id)}">
+    <span class="route-name">${routeName(route)} ${tag}</span>
+    <span class="route-meta"><span><b>${fmt(route.traffic_travel_time_min, 0)}</b>분</span><span><b>${fmt(route.distance_km, 1)}</b>km</span></span>
+    <span class="route-delta">
+      <span class="co2 ${tone}">${isFastest ? "기준" : `${signed(change)}%`}<small>CO₂</small></span>
+      <span class="time">${timeText}</span>
+    </span>
+    <span class="tradeoff" aria-hidden="true">
+      <i class="${tone}" style="transform:scaleX(${(relative / maxRelative).toFixed(4)})"></i>
+      <em style="left:${(100 / maxRelative * 100).toFixed(2)}%"></em>
+    </span>
+  </label>`;
+}
+
+function selectRoute(routeId, carDelay = 0) {
+  state.selectedRouteId = String(routeId);
+  state.routeLayers.forEach(({ casing, line, tip }, id) => {
+    const selected = String(id) === state.selectedRouteId;
+    casing.setStyle({ weight: selected ? 13 : 8, opacity: selected ? 1 : 0.7 });
+    line.setStyle({ weight: selected ? 7 : 4, opacity: selected ? 1 : 0.5 });
+    tip?.getElement()?.classList.toggle("selected", selected);
+  });
+  const selected = [...state.routeLayers.entries()].find(([id]) => String(id) === state.selectedRouteId)?.[1];
+  selected?.casing.bringToFront();
+  selected?.line.bringToFront();
+  startCar(carDelay);
+}
+
+// D3-M7: 선택한 경로를 따라 달리는 차. 화면에 하나뿐인 장식 루프라 탭이 숨겨지면 멈춘다.
+function startCar(delay = 0) {
+  stopCar();
+  if (!canAnimate(anime)) return;
+  const entry = [...state.routeLayers.entries()].find(([id]) => String(id) === state.selectedRouteId)?.[1];
+  const path = entry?.line.getLayers()[0]?.getElement();
+  if (!path) return;
+  const color = [...state.routeColors].find(([id]) => String(id) === state.selectedRouteId)?.[1];
+  // 경로와 같은 Leaflet SVG 안에 넣어야 같은 좌표계로 움직인다. 0°(오른쪽)를 향한 위에서 본 차.
+  const car = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  car.setAttribute("class", "route-car");
+  car.style.visibility = "hidden";
+  car.innerHTML = `
+    <circle r="12" fill="#fff" stroke="${color}" stroke-width="2.5"></circle>
+    <path d="M-7 -5h8.5l4.5 3v4l-4.5 3h-8.5a1.5 1.5 0 0 1-1.5-1.5v-7a1.5 1.5 0 0 1 1.5-1.5z" fill="${color}" stroke="none"></path>
+    <path d="M1.8-3.4 4-1.8v3.6L1.8 3.4z" fill="#fff" stroke="none" opacity=".9"></path>`;
+  path.parentNode.appendChild(car);
+  const { translateX, translateY, rotate } = anime.svg.createMotionPath(path);
+  const animation = anime.animate(car, {
+    translateX,
+    translateY,
+    rotate,
+    duration: 4000,
+    delay,
+    loop: true,
+    ease: "linear",
+    onBegin: () => { car.style.visibility = ""; },
+  });
+  if (document.hidden) animation.pause();
+  state.car = { el: car, animation, startAt: performance.now() + delay };
+}
+
+function stopCar() {
+  state.car?.animation.cancel();
+  state.car?.el.remove();
+  state.car = null;
+}
+
+// 줌하면 Leaflet이 경로 좌표를 다시 계산하므로, 같은 진행률에서 새 경로로 다시 출발시킨다.
+function restartCarAfterZoom() {
+  if (!state.car) return;
+  const wait = Math.max(0, state.car.startAt - performance.now());
+  const progress = state.car.animation.iterationProgress;
+  // Leaflet 경로가 zoomend 처리기에서 다시 그려진 다음에 읽어야 한다.
+  setTimeout(() => {
+    if (!state.car) return;
+    startCar(wait);
+    if (!wait) state.car.animation.iterationProgress = progress;
+  }, 0);
+}
+
+// 한 화면의 연출: 경로가 순서대로 그려지고 트레이드오프 막대가 차오른다.
+function animateCompare(ordered) {
+  if (!canAnimate(anime)) return;
+  ordered.forEach((route, index) => {
+    if (!state.routeLayers.has(route.route_id)) return;
+    const elements = routeElements(route.route_id);
+    anime.animate(anime.svg.createDrawable(elements), {
+      draw: ["0 0", "0 1"],
+      duration: 900,
+      delay: index * 150,
+      ease: "outExpo",
+      onComplete: () => elements.forEach((element) => {
+        element.removeAttribute("pathLength");
+        element.style.strokeDasharray = "";
+        element.style.strokeDashoffset = "";
+      }),
     });
   });
-  state.armedRouteId = null;
-  selectRoute(routes[0].route_id, true);
-}
-
-function routeCardHtml(route) {
-  const originalIndex = Number(route.route_id.split("_")[1]) - 1;
-  const badges = [
-    route.is_greenest_route ? '<span class="badge eco">ECO</span>' : "",
-    route.is_fastest_route ? '<span class="badge fast">FASTEST</span>' : "",
-  ].join("");
-  return `<button class="route-card" type="button" data-route-id="${route.route_id}">
-    <span class="route-stripe" style="background:${routeColors[originalIndex]}"></span>
-    <span class="route-card-content">
-      <span class="route-card-top">
-        <span class="route-name">${routeLabel(route)}</span>
-        <span class="badges">${badges}</span>
-      </span>
-      <span class="route-metrics">
-        <span class="metric"><small>예상시간</small><strong>${route.traffic_travel_time_min.toFixed(1)}분</strong></span>
-        <span class="metric"><small>총 거리</small><strong>${route.distance_km.toFixed(2)}km</strong></span>
-        <span class="metric"><small>예상 탄소배출</small><strong>약 ${route.total_co2_kg.toFixed(3)}kg</strong></span>
-      </span>
-      <span class="route-confirm">한 번 더 누르면 이 경로로 안내를 시작합니다 <svg class="nav-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg></span>
-    </span>
-  </button>`;
-}
-
-function routeLabel(route) {
-  if (route.is_greenest_route && route.is_fastest_route) return "예상 저탄소·최단시간 경로";
-  if (route.is_greenest_route) return "예상 저탄소 경로";
-  if (route.is_fastest_route) return "가장 빠른 경로";
-  return `대안 경로 ${route.route_id.split("_")[1]}`;
-}
-
-function selectRoute(routeId, scrollCard) {
-  state.selectedRouteId = routeId;
-  state.routeLayers.forEach((layer, id) => {
-    const selected = id === routeId;
-    layer.setStyle({ weight: selected ? 10 : 5, opacity: selected ? 1 : .62 });
-    if (selected) layer.bringToFront();
-  });
-  document.querySelectorAll(".route-card").forEach((card) => {
-    const selected = card.dataset.routeId === routeId;
-    card.classList.toggle("selected", selected);
-    if (selected && scrollCard) card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  anime.animate("#route-list .tradeoff i", {
+    scaleX: { from: 0 },
+    duration: 700,
+    delay: anime.stagger(60, { start: 200 }),
+    ease: "outExpo",
   });
 }
 
-function showImpact(routeId) {
-  const chosen = state.result.routes.find((route) => route.route_id === routeId);
-  const fastest = state.result.routes.find((route) => route.is_fastest_route);
-  if (!chosen || !fastest) return;
-  document.querySelector("#impact-title").textContent = chosen.is_fastest_route && chosen.is_greenest_route
-    ? "가장 빠르면서 친환경적인 길을 선택했어요"
-    : chosen.is_fastest_route
-      ? "가장 빠른 길을 선택했어요"
-      : "대안 경로를 선택했어요";
-  const relativePercent = fastest.total_energy_kwh > 0
-    ? chosen.total_energy_kwh / fastest.total_energy_kwh * 100
-    : 100;
-  const reductionPercent = 100 - relativePercent;
-  const absoluteChangePercent = Math.abs(reductionPercent);
-  const tolerancePercent = .05;
-  const isReduction = reductionPercent > tolerancePercent;
-  const isIncrease = reductionPercent < -tolerancePercent;
-  document.querySelector("#impact-comparison").textContent =
-    `${absoluteChangePercent.toFixed(1)}%`;
-  document.querySelector("#impact-comparison-label").textContent = isReduction
-    ? "CO₂ 배출 절감"
-    : isIncrease
-      ? "CO₂ 배출 증가"
-      : "CO₂ 배출 차이";
-  document.querySelector("#comparison-chip").textContent = isReduction
-    ? `가장 빠른 길 대비 ${absoluteChangePercent.toFixed(1)}% 낮음`
-    : isIncrease
-      ? `가장 빠른 길 대비 ${absoluteChangePercent.toFixed(1)}% 높음`
-      : "가장 빠른 길과 동일";
-  document.querySelector("#fast-carbon").textContent = "기준 100%";
-  document.querySelector("#chosen-carbon").textContent = `${relativePercent.toFixed(1)}%`;
-  const comparisonScale = Math.max(100, relativePercent, .001);
-  document.querySelector("#fast-bar").style.width = `${100 / comparisonScale * 100}%`;
-  document.querySelector("#chosen-bar").style.width = `${relativePercent / comparisonScale * 100}%`;
-  document.querySelector("#impact-message").textContent = isReduction
-    ? `가장 빠른 길보다 CO₂ 배출을 ${absoluteChangePercent.toFixed(1)}% 줄이는 경로를 선택했습니다.`
-    : isIncrease
-      ? `선택한 경로의 CO₂ 배출은 가장 빠른 길보다 ${absoluteChangePercent.toFixed(1)}% 높습니다.`
-      : "선택한 경로와 가장 빠른 길의 CO₂ 배출은 동일합니다.";
-  document.querySelector("#impact-route-meta").innerHTML = `
-    <span>선택 경로 <strong>${routeLabel(chosen)}</strong></span>
-    <span>요일 <strong>${weekDays[state.result.weekday]}</strong></span>
-    <span>거리 <strong>${chosen.distance_km.toFixed(2)}km</strong></span>
-    <span>예상시간 <strong>${chosen.traffic_travel_time_min.toFixed(1)}분</strong></span>`;
-  if (!state.resultRecorded) {
-    state.resultRecorded = true;
-    if (state.user) {
-      saveTrip(chosen, fastest);
-    } else {
-      recordWeeklyResult(chosen, fastest, reductionPercent);
-      document.querySelector("#trip-save-status").textContent = "로그인하면 주행 기록이 계정에 저장돼요.";
-    }
+/* ── D4 선택 완료 ─────────────────────────────────── */
+function showDone() {
+  const routes = state.result.routes;
+  const chosen = routes.find((route) => String(route.route_id) === state.selectedRouteId);
+  const fastest = fastestRoute(routes);
+  if (!chosen) return;
+  const change = co2Change(chosen, fastest);
+  const tone = toneOf(change);
+  const relative = 100 + change;
+
+  $("#done-title").textContent = chosen.is_greenest_route && chosen === fastest
+    ? "가장 빠르면서 덜 배출하는 길이에요"
+    : tone === "good"
+      ? "덜 배출하는 길을 골랐어요"
+      : chosen === fastest
+        ? "가장 빠른 길을 골랐어요"
+        : tone === "bad" ? "조금 더 배출하는 길을 골랐어요" : "가장 빠른 길과 배출이 같은 길이에요";
+  $("#done-label").textContent = tone === "good"
+    ? "가장 빠른 길보다 CO₂ 감소"
+    : tone === "bad" ? "가장 빠른 길보다 CO₂ 증가" : "가장 빠른 길과 같은 CO₂";
+  const number = $("#done-number");
+  number.className = `figure ${tone}`;
+  const scale = Math.max(100, relative);
+  const fastBar = $("#bar-fastest");
+  const chosenBar = $("#bar-chosen");
+  chosenBar.classList.toggle("bad", tone === "bad");
+  $("#bar-chosen-label").textContent = `${fmt(relative)}%`;
+  const { weekday, hour, vehicle } = state.result;
+  $("#done-meta").textContent = `${WEEK[weekday]}요일 ${pad2(hour)}:00 출발 · ${vehicle.label} · ${fmt(chosen.distance_km, 1)}km · 약 ${fmt(chosen.traffic_travel_time_min, 0)}분`;
+  // 가장 빠른 길 대비 아낀 양 (음수면 더 쓴 양)
+  const savedLiters = (fastest.total_energy_kwh - chosen.total_energy_kwh) / GASOLINE_KWH_PER_L;
+  const savedGrams = (fastest.total_co2_kg - chosen.total_co2_kg) * 1000;
+  const savedWon = savedLiters * GASOLINE_KRW_PER_L;
+  const word = (value, less, more) => (value >= 0 ? less : more);
+  $("#done-savings").className = `savings ${tone}`;
+  $("#done-savings").innerHTML = [
+    ["CO₂", `${fmt(Math.abs(savedGrams), 0)}<small>g</small>`, word(savedGrams, "적게", "많이")],
+    ["휘발유", `${fmt(Math.abs(savedLiters), 2)}<small>L</small>`, word(savedLiters, "절약", "더 씀")],
+    ["기름값", `${Math.round(Math.abs(savedWon)).toLocaleString("ko-KR")}<small>원</small>`, word(savedWon, "절약", "더 듦")],
+  ].map(([term, value, note]) => `<div><dt>${term}</dt><dd><span class="num">${value}</span> ${note}</dd></div>`).join("");
+
+  setStep("done");
+  const target = Math.abs(change);
+  const fastScale = 100 / scale;
+  const chosenScale = relative / scale;
+  if (canAnimate(anime)) {
+    const counter = { value: 0 };
+    anime.animate(counter, {
+      value: target,
+      duration: 1000,
+      ease: "outExpo",
+      onUpdate: () => { number.innerHTML = `${fmt(counter.value)}<small>%</small>`; },
+    });
+    anime.animate(fastBar, { scaleX: [0, fastScale], duration: 800, ease: "outExpo" });
+    anime.animate(chosenBar, { scaleX: [0, chosenScale], duration: 800, delay: 120, ease: "outExpo" });
+  } else {
+    number.innerHTML = `${fmt(target)}<small>%</small>`;
+    fastBar.style.transform = `scaleX(${fastScale})`;
+    chosenBar.style.transform = `scaleX(${chosenScale})`;
   }
-  renderWeeklyButton();
-  showScreen("impact-screen");
+  recordChoice(chosen, fastest);
 }
 
-function renderWeeklyButton() {
-  document.querySelector("#view-weekly").innerHTML =
-    `주간 기록 보기 (${state.weeklyRecords.length}/7) ${RIGHT_CHEVRON}`;
+function tripPayload(chosen, fastest) {
+  const weekday = Number(state.result.weekday);
+  const point = (kind) => ({
+    lat: state.result[kind].lat,
+    lon: state.result[kind].lon,
+    label: (state.points[kind]?.place_label || "").slice(0, 100),
+  });
+  return {
+    name: `${WEEK[weekday]}요일 ${routeName(chosen)}`,
+    driven_on: dateOfWeekday(weekday),
+    region: state.result.region,
+    hour: Number(state.result.hour),
+    weekday,
+    vehicle: state.result.vehicle.key,
+    start: point("start"),
+    destination: point("destination"),
+    route_label: routeName(chosen),
+    distance_km: chosen.distance_km,
+    baseline_energy_kwh: fastest.total_energy_kwh,
+    chosen_energy_kwh: chosen.total_energy_kwh,
+    baseline_co2_kg: fastest.total_co2_kg,
+    chosen_co2_kg: chosen.total_co2_kg,
+  };
 }
 
+async function recordChoice(chosen, fastest) {
+  const status = $("#save-status");
+  const routeId = String(chosen.route_id);
+  if (state.saved?.routeId === routeId) {
+    renderWeekDots();
+    return;
+  }
+  const payload = tripPayload(chosen, fastest);
+  if (!state.user) {
+    recordGuest(payload);
+    state.saved = { routeId };
+    renderWeekDots(payload.weekday);
+    status.classList.add("guest");
+    status.innerHTML = '<span>로그인하면 이 기록이 계정에 저장돼요. 지금은 이 탭에만 남아요.</span><button type="button" data-login="save">로그인</button>';
+    return;
+  }
+  status.classList.remove("guest");
+  status.textContent = "내 기록에 저장하고 있어요…";
+  try {
+    // 같은 계산 결과에서 경로만 바꿔 고르면 이전 저장분을 대체한다.
+    if (state.saved?.tripId) await api(`/api/trips/${state.saved.tripId}`, { method: "DELETE" }).catch(() => {});
+    const trip = await api("/api/trips", { method: "POST", body: payload });
+    state.saved = { routeId, tripId: trip.id };
+    state.weekly = await loadServerWeekly();
+    renderWeekDots(payload.weekday);
+    status.textContent = "내 기록에 저장했어요.";
+  } catch (error) {
+    state.saved = null;
+    status.textContent = `기록을 저장하지 못했어요. ${error.message}`;
+  }
+}
+
+function renderWeekDots(bounceDay) {
+  const recorded = new Set(state.weekly.map((record) => record.dayIndex));
+  $("#week-count").textContent = `${recorded.size} / 7일`;
+  $("#week-dots").innerHTML = WEEK.map((day, index) => {
+    const classes = [recorded.has(index) ? "filled" : "", index === todayIndex() ? "today" : ""].join(" ").trim();
+    return `<li class="${classes}" aria-label="${day}요일 ${recorded.has(index) ? "기록 있음" : "기록 없음"}">${day}</li>`;
+  }).join("");
+  if (bounceDay !== undefined && canAnimate(Motion)) {
+    const dot = $$("#week-dots li")[bounceDay];
+    Motion.animate(dot, { scale: [0.4, 1] }, { type: "spring", stiffness: 400, damping: 15, delay: 0.5 });
+  }
+}
+
+/* ── 주간 기록 (게스트: sessionStorage, 로그인: 서버) ── */
 function localDate(date) {
-  return [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, "0"),
-    String(date.getDate()).padStart(2, "0"),
-  ].join("-");
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 }
 
 function dateOfWeekday(weekday) {
   const date = new Date();
-  date.setDate(date.getDate() - ((date.getDay() + 6) % 7) + weekday);
+  date.setDate(date.getDate() - todayIndex() + weekday);
   return localDate(date);
 }
 
@@ -832,345 +887,667 @@ function weekdayOfDate(isoDate) {
   return (new Date(`${isoDate}T00:00:00`).getDay() + 6) % 7;
 }
 
-function escapeHtml(value) {
-  const element = document.createElement("span");
-  element.textContent = String(value);
-  return element.innerHTML.replaceAll('"', "&quot;");
-}
-
-async function saveTrip(chosen, fastest) {
-  const status = document.querySelector("#trip-save-status");
-  const weekday = Number(state.result.weekday);
-  const pointPayload = (kind) => ({
-    lat: state.result[kind].lat,
-    lon: state.result[kind].lon,
-    label: state.points[kind]?.place_label || "",
-  });
-  status.textContent = "주행 기록 저장 중…";
+function loadGuest() {
   try {
-    await api("/api/trips", {
-      method: "POST",
-      body: {
-        name: `${weekDays[weekday]} ${routeLabel(chosen)}`,
-        driven_on: dateOfWeekday(weekday),
-        region: state.result.region,
-        hour: Number(state.result.hour),
-        weekday,
-        vehicle: state.result.vehicle.key,
-        start: pointPayload("start"),
-        destination: pointPayload("destination"),
-        route_label: routeLabel(chosen),
-        distance_km: chosen.distance_km,
-        baseline_energy_kwh: fastest.total_energy_kwh,
-        chosen_energy_kwh: chosen.total_energy_kwh,
-        baseline_co2_kg: fastest.total_co2_kg,
-        chosen_co2_kg: chosen.total_co2_kg,
-      },
-    });
-    state.weeklyRecords = await loadServerWeeklyRecords();
-    renderWeeklyButton();
-    status.textContent = "내 주행 기록에 저장했어요.";
-  } catch (error) {
-    state.resultRecorded = false;
-    status.textContent = `주행 기록을 저장하지 못했어요: ${error.message}`;
-  }
-}
-
-async function loadServerWeeklyRecords() {
-  const params = new URLSearchParams({
-    from: dateOfWeekday(0),
-    to: dateOfWeekday(6),
-    sort: "created_at",
-    order: "desc",
-    size: "50",
-  });
-  const { items } = await api(`/api/trips?${params}`);
-  const latestByDay = new Map();
-  items.forEach((trip) => {
-    const dayIndex = weekdayOfDate(trip.driven_on);
-    if (latestByDay.has(dayIndex)) return;
-    latestByDay.set(dayIndex, {
-      dayIndex,
-      day: weekDays[dayIndex],
-      reductionPercent: trip.reduction_percent,
-      baselineEnergy: trip.baseline_energy_kwh,
-      chosenEnergy: trip.chosen_energy_kwh,
-      baselineCo2: trip.baseline_co2_kg,
-      chosenCo2: trip.chosen_co2_kg,
-      region: trip.region,
-      regionLabel: state.config?.regions.find((region) => region.key === trip.region)?.label || trip.region,
-      routeLabel: trip.route_label,
-      distanceKm: trip.distance_km,
-    });
-  });
-  return [...latestByDay.values()].sort((a, b) => a.dayIndex - b.dayIndex);
-}
-
-function loadWeeklyRecords() {
-  try {
-    const stored = JSON.parse(sessionStorage.getItem(WEEKLY_STORAGE_KEY) || "[]");
+    const stored = JSON.parse(sessionStorage.getItem(GUEST_KEY) || "[]");
     if (!Array.isArray(stored)) return [];
-    const latestByDay = new Map();
+    const latest = new Map();
     stored
-      .filter((record) => (
-        Number.isInteger(Number(record?.dayIndex))
-        && Number(record.dayIndex) >= 0
-        && Number(record.dayIndex) < weekDays.length
-        && Number.isFinite(record?.baselineEnergy)
-        && Number.isFinite(record?.chosenEnergy)
-        && Number.isFinite(record?.reductionPercent)
-      ))
-      .forEach((record) => {
-        const dayIndex = Number(record.dayIndex);
-        latestByDay.set(dayIndex, { ...record, dayIndex, day: weekDays[dayIndex] });
-      });
-    return [...latestByDay.values()].sort((a, b) => a.dayIndex - b.dayIndex);
+      .filter((record) => Number.isInteger(record?.dayIndex) && record.dayIndex >= 0 && record.dayIndex < 7
+        && Number.isFinite(record.baselineEnergy) && Number.isFinite(record.chosenEnergy))
+      .forEach((record) => latest.set(record.dayIndex, record));
+    return [...latest.values()].sort((a, b) => a.dayIndex - b.dayIndex);
   } catch {
     return [];
   }
 }
 
-function saveWeeklyRecords() {
-  try {
-    sessionStorage.setItem(WEEKLY_STORAGE_KEY, JSON.stringify(state.weeklyRecords));
-  } catch {
-  }
+function saveGuest(records) {
+  try { sessionStorage.setItem(GUEST_KEY, JSON.stringify(records)); } catch {}
 }
 
-function recordWeeklyResult(chosen, fastest, reductionPercent) {
-  const dayIndex = Number(state.result.weekday);
-  const latestRecord = {
-    dayIndex,
-    day: weekDays[dayIndex],
-    reductionPercent,
-    baselineEnergy: fastest.total_energy_kwh,
-    chosenEnergy: chosen.total_energy_kwh,
-    baselineCo2: fastest.total_co2_kg,
-    chosenCo2: chosen.total_co2_kg,
-    region: state.result.region,
-    regionLabel: state.result.region_label || state.result.region,
-    routeLabel: routeLabel(chosen),
-    distanceKm: chosen.distance_km,
+function recordGuest(payload) {
+  const record = {
+    dayIndex: payload.weekday,
+    baselineEnergy: payload.baseline_energy_kwh,
+    chosenEnergy: payload.chosen_energy_kwh,
+    baselineCo2: payload.baseline_co2_kg,
+    chosenCo2: payload.chosen_co2_kg,
+    regionLabel: state.result.region_label || payload.region,
+    routeLabel: payload.route_label,
+    distanceKm: payload.distance_km,
+    trip: payload,
   };
-  state.weeklyRecords = loadWeeklyRecords()
-    .filter((record) => Number(record.dayIndex) !== dayIndex);
-  state.weeklyRecords.push(latestRecord);
-  state.weeklyRecords.sort((a, b) => a.dayIndex - b.dayIndex);
-  saveWeeklyRecords();
+  state.weekly = [...loadGuest().filter((item) => item.dayIndex !== record.dayIndex), record]
+    .sort((a, b) => a.dayIndex - b.dayIndex);
+  saveGuest(state.weekly);
 }
 
-async function showWeeklyReport() {
-  if (!state.user) {
-    state.weeklyRecords = loadWeeklyRecords();
+async function loadServerWeekly() {
+  const params = new URLSearchParams({
+    from: dateOfWeekday(0), to: dateOfWeekday(6), sort: "created_at", order: "desc", size: "50",
+  });
+  const { items } = await api(`/api/trips?${params}`);
+  const latest = new Map();
+  items.forEach((trip) => {
+    const dayIndex = weekdayOfDate(trip.driven_on);
+    if (latest.has(dayIndex)) return;
+    latest.set(dayIndex, {
+      dayIndex,
+      baselineEnergy: trip.baseline_energy_kwh,
+      chosenEnergy: trip.chosen_energy_kwh,
+      baselineCo2: trip.baseline_co2_kg,
+      chosenCo2: trip.chosen_co2_kg,
+      regionLabel: regionLabel(trip.region),
+      routeLabel: trip.route_label,
+      distanceKm: trip.distance_km,
+    });
+  });
+  return [...latest.values()].sort((a, b) => a.dayIndex - b.dayIndex);
+}
+
+function regionLabel(key) {
+  return state.config?.regions.find((region) => region.key === key)?.short_label || key;
+}
+
+const co2Of = (record, kind) => {
+  const stored = Number(record[`${kind}Co2`]);
+  return Number.isFinite(stored) ? stored : Number(record[`${kind}Energy`]) * CO2_KG_PER_KWH;
+};
+
+/* ── D5 주간 리포트 ───────────────────────────────── */
+async function showWeekly() {
+  if (state.user) {
+    try { state.weekly = await loadServerWeekly(); } catch {}
   } else {
-    try {
-      state.weeklyRecords = await loadServerWeeklyRecords();
-    } catch {
-    }
+    state.weekly = loadGuest();
   }
-  renderWeeklyReport();
-  showScreen("weekly-screen");
+  renderWeekly();
 }
 
-function renderWeeklyReport() {
-  const completed = state.weeklyRecords.length;
-  const recordsByDay = new Map(
-    state.weeklyRecords.map((record, index) => [record.dayIndex ?? index, record])
-  );
-  const maxMagnitude = Math.max(
-    10,
-    ...state.weeklyRecords.map((record) => Math.abs(record.reductionPercent))
-  );
-  document.querySelector("#weekly-chart").innerHTML = weekDays.map((day, index) => {
-    const record = recordsByDay.get(index);
-    if (!record) {
-      return `<div class="weekly-day">
-        <span class="weekly-day-value pending">대기</span>
-        <div class="weekly-bar-track"><div class="weekly-day-bar pending"></div></div>
-        <span class="weekly-day-label">${day.slice(0, 1)}<small>미기록</small></span>
-      </div>`;
+function renderWeekly() {
+  const records = state.weekly;
+  const monday = new Date(`${dateOfWeekday(0)}T00:00:00`);
+  const sunday = new Date(`${dateOfWeekday(6)}T00:00:00`);
+  const md = (date) => `${date.getMonth() + 1}월 ${date.getDate()}일`;
+  $("#weekly-range").textContent = `${md(monday)}부터 ${md(sunday)}까지`;
+  $("#weekly-progress").textContent = `${records.length} / 7일`;
+  $("#weekly-empty").hidden = records.length > 0;
+  $("#weekly-content").hidden = records.length === 0;
+  $("#weekly-note").textContent = `휘발유 ${GASOLINE_KWH_PER_L}kWh/L, ${GASOLINE_CO2_KG_PER_L}kgCO₂/L, ${GASOLINE_KRW_PER_L.toLocaleString("ko-KR")}원/L로 환산한 모델 추정값이에요. 같은 요일을 다시 고르면 최신 기록으로 바뀌어요.${state.user ? "" : " 로그인하지 않으면 이 탭을 닫을 때 기록이 사라져요."}`;
+  if (!records.length) return;
+
+  const sum = (pick) => records.reduce((total, record) => total + pick(record), 0);
+  const baseCo2 = sum((record) => co2Of(record, "baseline"));
+  const chosenCo2 = sum((record) => co2Of(record, "chosen"));
+  const baseEnergy = sum((record) => Number(record.baselineEnergy));
+  const chosenEnergy = sum((record) => Number(record.chosenEnergy));
+  const change = baseCo2 > 0 ? (chosenCo2 / baseCo2 - 1) * 100 : 0;
+  const tone = toneOf(change);
+  const savedCo2 = baseCo2 - chosenCo2;
+  const savedFuel = (baseEnergy - chosenEnergy) / GASOLINE_KWH_PER_L;
+  const savedCost = savedFuel * GASOLINE_KRW_PER_L;
+  const less = savedCo2 >= 0;
+
+  const figure = $("#weekly-change");
+  figure.className = `figure ${tone}`;
+  $("#weekly-change-label").textContent = tone === "base"
+    ? "가장 빠른 길로만 다녔을 때와 CO₂가 같아요"
+    : `가장 빠른 길로만 다녔을 때보다 CO₂가 ${tone === "good" ? "줄었어요" : "늘었어요"}`;
+  $("#weekly-co2").previousElementSibling.textContent = less ? "줄인 CO₂" : "늘어난 CO₂";
+  $("#weekly-fuel").previousElementSibling.textContent = less ? "아낀 휘발유" : "더 쓴 휘발유";
+  $("#weekly-cost").previousElementSibling.textContent = less ? "아낀 기름값" : "더 든 기름값";
+  $("#weekly-co2").innerHTML = `${fmt(Math.abs(savedCo2), 2)}<small>kg</small>`;
+  $("#weekly-fuel").innerHTML = `${fmt(Math.abs(savedFuel), 2)}<small>L</small>`;
+  $("#weekly-cost").innerHTML = `${Math.round(Math.abs(savedCost)).toLocaleString("ko-KR")}<small>원</small>`;
+
+  renderWeekChart(records);
+  renderWeekTable(records, { baseCo2, chosenCo2, chosenEnergy, change });
+
+  if (canAnimate(anime)) {
+    const counter = { value: 0 };
+    anime.animate(counter, {
+      value: change,
+      duration: 1000,
+      ease: "outExpo",
+      onUpdate: () => { figure.innerHTML = `${signed(counter.value)}<small>%</small>`; },
+    });
+  } else {
+    figure.innerHTML = `${signed(change)}<small>%</small>`;
+  }
+}
+
+function recordChange(record) {
+  const base = co2Of(record, "baseline");
+  return base > 0 ? (co2Of(record, "chosen") / base - 1) * 100 : 0;
+}
+
+function renderWeekChart(records) {
+  const byDay = new Map(records.map((record) => [record.dayIndex, recordChange(record)]));
+  // 위쪽 = 감소(좋음), 아래쪽 = 증가
+  const values = [...byDay.values()].map((value) => -value);
+  const top = Math.max(5, ...values) * 1.25;
+  const deepest = Math.max(0, ...values.map((value) => -value));
+  // 아래쪽 막대도 수치 라벨이 들어갈 자리를 남긴다.
+  const bottom = deepest > 0 ? Math.max(deepest * 1.6, top * 0.35) : 0;
+  const total = top + bottom;
+  const zero = top / total * 100;
+  const chart = $("#weekly-chart");
+  chart.setAttribute("aria-label", WEEK.map((day, index) => (byDay.has(index)
+    ? `${day}요일 ${signed(byDay.get(index))}%`
+    : `${day}요일 기록 없음`)).join(", "));
+  chart.innerHTML = WEEK.map((day, index) => {
+    const today = index === todayIndex() ? " today" : "";
+    if (!byDay.has(index)) {
+      return `<div class="wk-col"><div class="wk-plot"><span class="wk-empty">기록 없음</span></div><span class="wk-day${today}">${day}</span></div>`;
     }
-    const value = Number(record.reductionPercent);
-    const height = Math.max(4, Math.abs(value) / maxMagnitude * 100);
-    const negativeClass = value < 0 ? " negative" : "";
-    return `<div class="weekly-day" title="${escapeHtml(`${record.regionLabel} · ${record.routeLabel}`)}">
-      <span class="weekly-day-value${negativeClass}">${value.toFixed(1)}%</span>
-      <div class="weekly-bar-track"><div class="weekly-day-bar${negativeClass}" style="height:${height}%"></div></div>
-      <span class="weekly-day-label">${day.slice(0, 1)}<small>완료</small></span>
-    </div>`;
+    const change = byDay.get(index);
+    const tone = toneOf(change);
+    const height = Math.max(1.5, Math.abs(change) / total * 100);
+    const up = change <= 0;
+    const bar = up
+      ? `<i class="wk-bar" style="bottom:${100 - zero}%;height:${height}%;transform-origin:bottom"></i>`
+      : `<i class="wk-bar bad" style="top:${zero}%;height:${height}%;transform-origin:top"></i>`;
+    const label = up
+      ? `<span class="wk-value ${tone}" style="bottom:calc(${100 - zero + height}% + 6px)">${signed(change)}%</span>`
+      : `<span class="wk-value bad" style="top:calc(${zero + height}% + 6px)">${signed(change)}%</span>`;
+    return `<div class="wk-col"><div class="wk-plot"><span class="wk-zero" style="top:${zero}%"></span>${bar}${label}</div><span class="wk-day${today}">${day}</span></div>`;
   }).join("");
-
-  const baselineTotal = state.weeklyRecords.reduce(
-    (total, record) => total + Number(record.baselineEnergy), 0
-  );
-  const chosenTotal = state.weeklyRecords.reduce(
-    (total, record) => total + Number(record.chosenEnergy), 0
-  );
-  const weeklyReduction = baselineTotal > 0
-    ? (1 - chosenTotal / baselineTotal) * 100
-    : 0;
-  const chosenCo2Total = state.weeklyRecords.reduce((total, record) => {
-    const storedCo2 = Number(record.chosenCo2);
-    return total + (Number.isFinite(storedCo2)
-      ? storedCo2
-      : Number(record.chosenEnergy) * CO2_KG_PER_KWH);
-  }, 0);
-  const baselineCo2Total = state.weeklyRecords.reduce((total, record) => {
-    const storedCo2 = Number(record.baselineCo2);
-    return total + (Number.isFinite(storedCo2)
-      ? storedCo2
-      : Number(record.baselineEnergy) * CO2_KG_PER_KWH);
-  }, 0);
-  const chosenFuelLiters = chosenTotal / DIESEL_KWH_PER_LITER;
-  const baselineFuelLiters = baselineTotal / DIESEL_KWH_PER_LITER;
-  const chosenFuelCost = chosenFuelLiters * DIESEL_PRICE_KRW_PER_LITER;
-  const baselineFuelCost = baselineFuelLiters * DIESEL_PRICE_KRW_PER_LITER;
-  const savedFuelCost = baselineFuelCost - chosenFuelCost;
-  const decimal = (value, digits = 2) => Number(value).toLocaleString("ko-KR", {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  });
-  const won = (value) => Math.round(Math.abs(value)).toLocaleString("ko-KR");
-  const setMetric = (selector, value, unit, digits = 2) => {
-    document.querySelector(selector).innerHTML = `${decimal(value, digits)} <small>${unit}</small>`;
-  };
-
-  document.querySelector("#weekly-progress").textContent = `${completed} / 7일`;
-  setMetric("#weekly-co2-chosen", chosenCo2Total, "kgCO₂eq");
-  setMetric("#weekly-co2-fastest", baselineCo2Total, "kgCO₂eq");
-  setMetric("#weekly-fuel-chosen", chosenFuelLiters, "L");
-  setMetric("#weekly-fuel-fastest", baselineFuelLiters, "L");
-  setMetric("#weekly-energy-chosen", chosenTotal, "kWh");
-  setMetric("#weekly-energy-fastest", baselineTotal, "kWh");
-  document.querySelector("#weekly-cost-chosen").innerHTML = `${won(chosenFuelCost)}<small>원</small>`;
-  document.querySelector("#weekly-cost-fastest").innerHTML = `${won(baselineFuelCost)}<small>원</small>`;
-  const costSavingElement = document.querySelector("#weekly-cost-saving");
-  costSavingElement.textContent = Math.abs(savedFuelCost) < .5
-    ? `경유 ${DIESEL_PRICE_KRW_PER_LITER.toLocaleString("ko-KR")}원/L · 차이 없음`
-    : savedFuelCost > 0
-      ? `약 ${won(savedFuelCost)}원 절약`
-      : `약 ${won(savedFuelCost)}원 증가`;
-  costSavingElement.classList.toggle("increase", savedFuelCost < -.5);
-  document.querySelector("#weekly-chart").dataset.weeklyReduction = weeklyReduction.toFixed(1);
-  document.querySelector("#weekly-next-route").innerHTML = completed >= 7
-    ? '요일별 기록 수정하기 <span>↻</span>'
-    : `다른 요일 경로 찾기 ${RIGHT_CHEVRON}`;
+  if (canAnimate(anime)) {
+    anime.animate("#weekly-chart .wk-bar", {
+      scaleY: { from: 0 },
+      duration: 800,
+      delay: anime.stagger(50),
+      ease: "outExpo",
+    });
+  }
 }
 
-function bindTripEvents() {
-  document.querySelector("#trips-button").addEventListener("click", () => {
-    showScreen("trips-screen");
-    loadTrips(1);
-  });
-  document.querySelector("#trips-filter").addEventListener("submit", (event) => {
-    event.preventDefault();
-    loadTrips(1);
-  });
-  document.querySelector("#trips-filter").elements.sort.addEventListener("change", () => loadTrips(1));
-  document.querySelector("#trips-prev").addEventListener("click", () => loadTrips(state.tripsPage - 1));
-  document.querySelector("#trips-next").addEventListener("click", () => loadTrips(state.tripsPage + 1));
+function renderWeekTable(records, totals) {
+  const krw = (energy) => Math.round(energy / GASOLINE_KWH_PER_L * GASOLINE_KRW_PER_L).toLocaleString("ko-KR");
+  const deltaCell = (change) => `<td class="num"><span class="delta ${toneOf(change)}">${signed(change)}%</span></td>`;
+  $("#weekly-rows").innerHTML = records.map((record) => {
+    const energy = Number(record.chosenEnergy);
+    return `<tr>
+      <td><b>${WEEK[record.dayIndex]}</b></td>
+      <td>${escapeHtml(record.routeLabel || "")} <span class="sub">${escapeHtml(record.regionLabel || "")}</span></td>
+      <td class="num">${fmt(record.distanceKm || 0, 1)} km</td>
+      <td class="num">${fmt(co2Of(record, "chosen"), 2)} <span class="sub">/ ${fmt(co2Of(record, "baseline"), 2)} kg</span></td>
+      <td class="num">${fmt(energy / GASOLINE_KWH_PER_L, 2)} L</td>
+      <td class="num">${krw(energy)}원</td>
+      ${deltaCell(recordChange(record))}
+    </tr>`;
+  }).join("");
+  const distance = records.reduce((total, record) => total + Number(record.distanceKm || 0), 0);
+  $("#weekly-total").innerHTML = `<tr>
+    <td>합계</td><td></td>
+    <td class="num">${fmt(distance, 1)} km</td>
+    <td class="num">${fmt(totals.chosenCo2, 2)} <span class="sub">/ ${fmt(totals.baseCo2, 2)} kg</span></td>
+    <td class="num">${fmt(totals.chosenEnergy / GASOLINE_KWH_PER_L, 2)} L</td>
+    <td class="num">${krw(totals.chosenEnergy)}원</td>
+    ${deltaCell(totals.change)}
+  </tr>`;
+}
 
-  const dialog = document.querySelector("#trip-dialog");
-  const form = document.querySelector("#trip-edit-form");
-  document.querySelector("#trip-edit-cancel").addEventListener("click", () => dialog.close());
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const { name, driven_on: drivenOn, memo } = Object.fromEntries(new FormData(form));
-    try {
-      await api(`/api/trips/${state.editingTripId}`, {
-        method: "PATCH",
-        body: { name, driven_on: drivenOn, memo },
-      });
-      dialog.close();
-      loadTrips(state.tripsPage);
-    } catch (error) {
-      document.querySelector("#trip-edit-error").textContent = error.message;
-    }
-  });
+/* ── D6 내 기록 ───────────────────────────────────── */
+function showTrips() {
+  $("#trips-locked").hidden = Boolean(state.user);
+  $("#trips-content").hidden = !state.user;
+  if (state.user) loadTrips(1);
+  else $("#trips-total").textContent = "0건";
 }
 
 async function loadTrips(page) {
-  const filter = document.querySelector("#trips-filter");
+  const filter = $("#trips-filter");
   const [sort, order] = filter.elements.sort.value.split(":");
   const params = new URLSearchParams({ q: filter.elements.q.value.trim(), sort, order, page, size: 10 });
-  const error = document.querySelector("#trips-error");
-  error.textContent = "";
+  $("#trips-error").textContent = "";
   try {
     const result = await api(`/api/trips?${params}`);
-    if (result.page > 1 && result.page > result.total_pages) return loadTrips(Math.max(1, result.total_pages));
+    if (result.page > 1 && result.page > result.total_pages) {
+      loadTrips(Math.max(1, result.total_pages));
+      return;
+    }
     state.tripsPage = result.page;
     renderTrips(result);
-  } catch (loadError) {
-    error.textContent = loadError.message;
+  } catch (error) {
+    $("#trips-error").textContent = error.message;
   }
+}
+
+function tripRoute(trip) {
+  const from = trip.start?.label;
+  const to = trip.destination?.label;
+  return from && to ? `${from}에서 ${to}까지` : `${trip.route_label}, ${regionLabel(trip.region)}`;
 }
 
 function renderTrips({ items, page, total, total_pages: totalPages }) {
-  const template = document.querySelector("#trip-row-template");
-  document.querySelector("#trip-list").replaceChildren(...items.map((trip) => {
+  const template = $("#trip-row-template");
+  const pending = state.pendingDelete?.trip.id;
+  $("#trip-list").replaceChildren(...items.map((trip) => {
     const row = template.content.firstElementChild.cloneNode(true);
-    row.querySelector(".trip-name").textContent = trip.name;
-    row.querySelector(".trip-meta").textContent =
-      `${trip.driven_on} (${weekDays[weekdayOfDate(trip.driven_on)].slice(0, 1)}) · `
-      + `${String(trip.hour).padStart(2, "0")}:00 · ${trip.route_label} · ${trip.distance_km.toFixed(2)}km`;
-    const memo = row.querySelector(".trip-memo");
-    memo.textContent = trip.memo;
-    memo.hidden = !trip.memo;
-    const reduction = row.querySelector(".trip-reduction");
-    const value = trip.reduction_percent;
-    reduction.textContent = value > 0
-      ? `${value.toFixed(1)}% 절감`
-      : value < 0 ? `${Math.abs(value).toFixed(1)}% 증가` : "차이 없음";
-    reduction.classList.toggle("negative", value < 0);
-    row.querySelector('[data-action="edit"]').addEventListener("click", () => openTripDialog(trip));
-    row.querySelector('[data-action="delete"]').addEventListener("click", () => deleteTrip(trip));
+    row.hidden = trip.id === pending;
+    row.dataset.id = trip.id;
+    const [, month, day] = trip.driven_on.split("-");
+    $(".trip-date b", row).textContent = `${Number(month)}.${day}`;
+    $(".trip-date small", row).textContent = `${WEEK[weekdayOfDate(trip.driven_on)]} ${pad2(trip.hour)}시`;
+    $(".trip-main strong", row).textContent = trip.name;
+    $(".trip-main span", row).textContent = tripRoute(trip);
+    $(".trip-main em", row).textContent = trip.memo || "";
+    $(".trip-main em", row).hidden = !trip.memo;
+    $(".trip-distance", row).textContent = `${fmt(trip.distance_km, 1)}km`;
+    const change = -trip.reduction_percent;
+    const delta = $(".delta", row);
+    delta.textContent = `${signed(change)}%`;
+    delta.classList.add(toneOf(change));
+    $(".trip-row", row).addEventListener("click", () => openDrawer(trip));
     return row;
   }));
-  const searching = document.querySelector("#trips-filter").elements.q.value.trim() !== "";
-  const empty = document.querySelector("#trips-empty");
-  empty.hidden = total > 0;
-  empty.textContent = searching
-    ? "검색 결과가 없습니다."
-    : "아직 저장된 주행 기록이 없습니다. 경로를 찾아 확정하면 여기에 쌓여요.";
-  document.querySelector("#trips-total").textContent = `${total}건`;
-  document.querySelector("#trips-page").textContent = totalPages ? `${page} / ${totalPages}` : "";
-  document.querySelector("#trips-prev").disabled = page <= 1;
-  document.querySelector("#trips-next").disabled = page >= totalPages;
-}
-
-function openTripDialog(trip) {
-  const form = document.querySelector("#trip-edit-form");
-  state.editingTripId = trip.id;
-  form.elements.name.value = trip.name;
-  form.elements.driven_on.value = trip.driven_on;
-  form.elements.memo.value = trip.memo;
-  document.querySelector("#trip-edit-error").textContent = "";
-  document.querySelector("#trip-dialog").showModal();
-}
-
-async function deleteTrip(trip) {
-  if (!window.confirm(`'${trip.name}' 기록을 삭제할까요?`)) return;
-  try {
-    await api(`/api/trips/${trip.id}`, { method: "DELETE" });
-    loadTrips(state.tripsPage);
-  } catch (error) {
-    document.querySelector("#trips-error").textContent = error.message;
+  const searching = $("#trips-filter").elements.q.value.trim() !== "";
+  $("#trips-empty").hidden = total > 0;
+  $("#trips-empty").textContent = searching
+    ? "검색어와 맞는 기록이 없어요. 다른 단어로 찾아보세요."
+    : "아직 저장된 기록이 없어요. 길찾기에서 경로를 고르면 여기에 쌓여요.";
+  $("#trips-total").textContent = `${total}건`;
+  $("#trips-page").textContent = totalPages > 1 ? `${page} / ${totalPages}` : "";
+  $("#trips-prev").disabled = page <= 1;
+  $("#trips-next").disabled = page >= totalPages;
+  if (canAnimate(anime) && items.length) {
+    anime.animate("#trip-list .trip-row", { opacity: { from: 0 }, y: { from: 6 }, duration: 260, delay: anime.stagger(30), ease: "outQuad" });
   }
 }
 
-function resetDemo() {
-  state.result = null;
-  state.resultRecorded = false;
-  state.selectedRouteId = null;
-  state.armedRouteId = null;
-  clearPoint("start");
-  clearPoint("destination");
-  document.querySelector("#start-field strong").textContent = "지도에서 출발 노드를 선택하세요";
-  document.querySelector("#destination-field strong").textContent = "지도에서 도착 노드를 선택하세요";
-  setPickMode("start");
-  updateSubmitState();
-  showScreen("setup-screen");
+function openDrawer(trip) {
+  state.drawerTrip = trip;
+  const drawer = $("#trip-drawer");
+  const change = -trip.reduction_percent;
+  const tone = toneOf(change);
+  const figure = $("#drawer-change");
+  figure.className = `figure ${tone}`;
+  figure.innerHTML = `${signed(change)}<small>%</small>`;
+  $("#drawer-change-label").textContent = "가장 빠른 길 대비 CO₂";
+  $("#drawer-facts").innerHTML = [
+    ["주행일", `${escapeHtml(trip.driven_on)} ${pad2(trip.hour)}:00`],
+    ["지역", escapeHtml(regionLabel(trip.region))],
+    ["출발", escapeHtml(trip.start?.label || `${trip.start.lat.toFixed(4)}, ${trip.start.lon.toFixed(4)}`)],
+    ["도착", escapeHtml(trip.destination?.label || `${trip.destination.lat.toFixed(4)}, ${trip.destination.lon.toFixed(4)}`)],
+    ["경로", escapeHtml(trip.route_label)],
+    ["차종", VEHICLE_LABELS[trip.vehicle] || escapeHtml(trip.vehicle)],
+    ["거리", `<span class="num">${fmt(trip.distance_km, 2)}</span> km`],
+    ["CO₂ 선택 / 빠른 길", `<span class="num">${fmt(trip.chosen_co2_kg, 2)} / ${fmt(trip.baseline_co2_kg, 2)}</span> kg`],
+  ].map(([term, value]) => `<div><dt>${term}</dt><dd>${value}</dd></div>`).join("");
+  const form = $("#trip-edit-form");
+  form.elements.name.value = trip.name;
+  form.elements.driven_on.value = trip.driven_on;
+  form.elements.memo.value = trip.memo || "";
+  $("#trip-edit-error").textContent = "";
+  drawer.showModal();
+  if (canAnimate(Motion)) {
+    const mobile = matchMedia("(max-width: 760px)").matches;
+    Motion.animate(drawer, mobile ? { y: ["40%", "0%"] } : { x: [48, 0], opacity: [0, 1] }, { type: "spring", stiffness: 260, damping: 26 });
+  }
 }
 
-initializeIntroHero();
+async function saveTripEdit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const { name, driven_on: drivenOn, memo } = Object.fromEntries(new FormData(form));
+  try {
+    await api(`/api/trips/${state.drawerTrip.id}`, { method: "PATCH", body: { name, driven_on: drivenOn, memo } });
+    $("#trip-drawer").close();
+    showToast("변경을 저장했어요");
+    loadTrips(state.tripsPage);
+  } catch (error) {
+    $("#trip-edit-error").textContent = error.message;
+  }
+}
+
+// 삭제는 5초 동안 되돌릴 수 있고, 그 뒤에 서버에서 지운다.
+function requestDelete() {
+  const trip = state.drawerTrip;
+  $("#trip-drawer").close();
+  commitDelete();
+  const row = $(`#trip-list li[data-id="${trip.id}"]`);
+  if (row) row.hidden = true;
+  state.pendingDelete = { trip, row, timer: setTimeout(commitDelete, 5000) };
+  showToast(`'${trip.name}' 기록을 삭제했어요`, { label: "되돌리기", onClick: undoDelete }, 5000);
+}
+
+function undoDelete() {
+  const pending = state.pendingDelete;
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  state.pendingDelete = null;
+  if (pending.row) pending.row.hidden = false;
+  showToast("삭제를 취소했어요");
+}
+
+async function commitDelete() {
+  const pending = state.pendingDelete;
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  state.pendingDelete = null;
+  try {
+    await api(`/api/trips/${pending.trip.id}`, { method: "DELETE" });
+  } catch (error) {
+    $("#trips-error").textContent = error.message;
+  }
+  if (currentView() === "trips") loadTrips(state.tripsPage);
+}
+
+/* ── 토스트 ───────────────────────────────────────── */
+function showToast(text, action, duration = 3000) {
+  const toast = $("#toast");
+  const button = $("#toast-action");
+  clearTimeout(state.toastTimer);
+  $("#toast-text").textContent = text;
+  button.hidden = !action;
+  button.textContent = action?.label || "";
+  button.onclick = action ? () => { hideToast(); action.onClick(); } : null;
+  const wasHidden = toast.hidden;
+  toast.hidden = false;
+  // 되돌리기 같은 시한부 동작은 남은 시간을 막대로 보여 준다.
+  toast.classList.remove("timed");
+  if (action) {
+    toast.style.setProperty("--toast-ms", `${duration}ms`);
+    void toast.offsetWidth;
+    toast.classList.add("timed");
+  }
+  if (wasHidden && canAnimate(Motion)) {
+    Motion.animate(toast, { y: [16, 0], opacity: [0, 1] }, { type: "spring", stiffness: 500, damping: 30 });
+  }
+  state.toastTimer = setTimeout(hideToast, duration);
+}
+
+function hideToast() {
+  clearTimeout(state.toastTimer);
+  $("#toast").hidden = true;
+}
+
+/* ── D7 로그인 · 계정 ─────────────────────────────── */
+async function loadUser() {
+  try {
+    state.user = await api("/api/users/me");
+  } catch {
+    state.user = null;
+  }
+  renderAccount();
+}
+
+function renderAccount() {
+  $("#account-button span").textContent = state.user ? `${state.user.nickname}님` : "로그인";
+}
+
+const AUTH_REASONS = {
+  save: "로그인하면 방금 고른 경로가 계정에 저장돼요.",
+  trips: "로그인하면 고른 경로를 계정에 모아 볼 수 있어요.",
+};
+
+function openAuth(reason) {
+  const dialog = $("#auth-dialog");
+  const form = $("#auth-form");
+  form.hidden = false;
+  $("#migrate").hidden = true;
+  form.reset();
+  setAuthMode("login");
+  $("#auth-reason").textContent = AUTH_REASONS[reason] || "";
+  $("#auth-reason").hidden = !AUTH_REASONS[reason];
+  dialog.showModal();
+  popIn(dialog);
+}
+
+function popIn(dialog) {
+  if (canAnimate(Motion)) Motion.animate(dialog, { scale: [0.96, 1], opacity: [0, 1] }, { type: "spring", stiffness: 500, damping: 30 });
+}
+
+function setAuthMode(mode) {
+  const form = $("#auth-form");
+  const signup = mode === "signup";
+  form.elements.mode.value = mode;
+  $$("[data-signup-only]", form).forEach((field) => {
+    field.hidden = !signup;
+    $("input", field).required = signup;
+  });
+  form.elements.password.autocomplete = signup ? "new-password" : "current-password";
+  $("#auth-title").textContent = signup ? "회원가입" : "로그인";
+  $("#auth-submit").textContent = signup ? "가입하고 시작하기" : "로그인";
+  $("#auth-error").textContent = "";
+}
+
+async function submitAuth(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const { mode, username, password, nickname } = Object.fromEntries(new FormData(form));
+  const submit = $("#auth-submit");
+  submit.disabled = true;
+  try {
+    state.user = mode === "signup"
+      ? await api("/api/users", { method: "POST", body: { username, password, nickname } })
+      : (await api("/api/sessions", { method: "POST", body: { username, password } })).user;
+    renderAccount();
+    afterLogin();
+  } catch (error) {
+    $("#auth-error").textContent = error.message;
+  } finally {
+    submit.disabled = false;
+  }
+}
+
+function afterLogin() {
+  const movable = loadGuest().filter((record) => record.trip);
+  if (movable.length) {
+    $("#auth-form").hidden = true;
+    $("#migrate").hidden = false;
+    $("#migrate-error").textContent = "";
+    $("#migrate-text").textContent = `로그인 전에 이 탭에서 고른 경로 ${movable.length}건이 있어요. 계정으로 옮기면 내 기록과 주간 리포트에 함께 보여요.`;
+  } else {
+    $("#auth-dialog").close();
+    showToast(`반가워요, ${state.user.nickname}님`);
+    refreshAfterAuth();
+  }
+}
+
+async function migrateGuest() {
+  const movable = loadGuest().filter((record) => record.trip);
+  const button = $("#migrate-confirm");
+  button.disabled = true;
+  try {
+    for (const record of movable) await api("/api/trips", { method: "POST", body: record.trip });
+    saveGuest([]);
+    $("#auth-dialog").close();
+    showToast(`기록 ${movable.length}건을 계정으로 옮겼어요`);
+    if (state.step === "done") {
+      $("#save-status").classList.remove("guest");
+      $("#save-status").textContent = "내 기록에 저장했어요.";
+    }
+  } catch (error) {
+    $("#migrate-error").textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function refreshAfterAuth() {
+  state.saved = state.saved && { routeId: state.saved.routeId };
+  if (state.user) {
+    try { state.weekly = await loadServerWeekly(); } catch {}
+  } else {
+    state.weekly = loadGuest();
+  }
+  if (state.step === "done") renderWeekDots();
+  renderView();
+}
+
+function openAccount() {
+  const dialog = $("#account-dialog");
+  $("#account-username").textContent = `아이디 ${state.user.username}`;
+  $("#nickname-form").elements.nickname.value = state.user.nickname;
+  $("#password-form").reset();
+  $("#delete-account-form").reset();
+  setAccountMessage("");
+  dialog.showModal();
+  popIn(dialog);
+}
+
+function setAccountMessage(text, ok = false) {
+  const message = $("#account-message");
+  message.textContent = text;
+  message.classList.toggle("ok", ok);
+}
+
+async function logout() {
+  try { await api("/api/sessions/current", { method: "DELETE" }); } catch {}
+  state.user = null;
+  state.saved = null;
+  renderAccount();
+  $("#account-dialog").close();
+  showToast("로그아웃했어요");
+  refreshAfterAuth();
+}
+
+function bindAccountForms() {
+  $("#nickname-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      state.user = await api("/api/users/me", { method: "PATCH", body: { nickname: event.currentTarget.elements.nickname.value } });
+      renderAccount();
+      setAccountMessage("닉네임을 바꿨어요.", true);
+    } catch (error) {
+      setAccountMessage(error.message);
+    }
+  });
+  $("#password-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    try {
+      await api("/api/users/me", { method: "PATCH", body: Object.fromEntries(new FormData(form)) });
+      form.reset();
+      setAccountMessage("비밀번호를 바꿨어요. 다른 기기에서는 로그아웃돼요.", true);
+    } catch (error) {
+      setAccountMessage(error.message);
+    }
+  });
+  $("#delete-account-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await api("/api/users/me", { method: "DELETE", body: Object.fromEntries(new FormData(event.currentTarget)) });
+      state.user = null;
+      state.saved = null;
+      renderAccount();
+      $("#account-dialog").close();
+      showToast("탈퇴했어요. 그동안 이용해 주셔서 고마워요");
+      refreshAfterAuth();
+    } catch (error) {
+      setAccountMessage(error.message);
+    }
+  });
+}
+
+/* ── 이벤트 연결 ──────────────────────────────────── */
+function bindEvents() {
+  window.addEventListener("hashchange", renderView);
+  window.addEventListener("resize", () => moveTabIndicator(true));
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) state.car?.animation.pause();
+    else state.car?.animation.resume();
+  });
+  window.addEventListener("pagehide", () => {
+    const pending = state.pendingDelete;
+    if (pending) fetch(`/api/trips/${pending.trip.id}`, { method: "DELETE", keepalive: true });
+  });
+
+  $$(".stop").forEach((stop) => stop.addEventListener("click", () => setPickMode(stop.dataset.pick)));
+  $("#swap-stops").addEventListener("click", swapStops);
+  $("#suggestion-chips").addEventListener("click", (event) => {
+    const chip = event.target.closest(".chip");
+    const node = chip && state.config.nodes.find((item) => item.id === chip.dataset.node);
+    if (!node) return;
+    pickNode(node);
+    state.map.panTo([node.lat, node.lon]);
+  });
+  $("#conditions").addEventListener("toggle", (event) => {
+    $(".conditions-edit").textContent = event.currentTarget.open ? "접기" : "바꾸기";
+  });
+  ["#hour", "#weekday"].forEach((selector) => $(selector).addEventListener("change", renderConditions));
+  $("#vehicle-options").addEventListener("change", renderConditions);
+  $("#region-options").addEventListener("change", (event) => switchRegion(event.target.value));
+  $("#find-routes").addEventListener("click", calculateRoutes);
+  $("#cancel-calc").addEventListener("click", cancelCalculation);
+  $("#choose-route").addEventListener("click", showDone);
+  $("#restart").addEventListener("click", () => {
+    clearPoint("start");
+    clearPoint("destination");
+    state.result = null;
+    renderStops();
+    setStep("pick");
+    setPickMode("start");
+    if (state.config) fitRegion();
+  });
+  $$("[data-to-step]").forEach((button) => button.addEventListener("click", () => {
+    const step = button.dataset.toStep;
+    if (step === "compare") showCompare({ returning: true });
+    else setStep(step);
+  }));
+  $("#sheet-handle").addEventListener("click", () => {
+    const collapsed = $("#panel").classList.toggle("collapsed");
+    $("#sheet-handle").setAttribute("aria-expanded", String(!collapsed));
+  });
+
+  $("#account-button").addEventListener("click", () => (state.user ? openAccount() : openAuth()));
+  document.addEventListener("click", (event) => {
+    const trigger = event.target.closest("[data-login]");
+    if (trigger) openAuth(trigger.dataset.login);
+  });
+  $("#auth-form").addEventListener("submit", submitAuth);
+  $("#auth-form").addEventListener("change", (event) => {
+    if (event.target.name === "mode") setAuthMode(event.target.value);
+  });
+  $("#migrate-confirm").addEventListener("click", migrateGuest);
+  $("#logout").addEventListener("click", logout);
+  bindAccountForms();
+
+  $$("dialog").forEach((dialog) => {
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog || event.target.closest("[data-close]")) dialog.close();
+    });
+  });
+  $("#auth-dialog").addEventListener("close", () => {
+    if (!$("#migrate").hidden) refreshAfterAuth();
+  });
+
+  $("#trips-filter").addEventListener("submit", (event) => {
+    event.preventDefault();
+    loadTrips(1);
+  });
+  $("#trips-filter").elements.sort.addEventListener("change", () => loadTrips(1));
+  $("#trips-prev").addEventListener("click", () => loadTrips(state.tripsPage - 1));
+  $("#trips-next").addEventListener("click", () => loadTrips(state.tripsPage + 1));
+  $("#trip-edit-form").addEventListener("submit", saveTripEdit);
+  $("#trip-delete").addEventListener("click", requestDelete);
+}
+
+async function initialize() {
+  playIntro();
+  bindEvents();
+  fillConditions();
+  renderConditions();
+  renderStops();
+  renderGuide();
+  initMap();
+  await loadUser();
+  state.weekly = state.user ? await loadServerWeekly().catch(() => []) : loadGuest();
+  renderView();
+  try {
+    const { items } = await api("/api/regions");
+    const region = items.find((item) => item.is_default) || items[0];
+    loadRegion(await api(`/api/regions/${encodeURIComponent(region.key)}`));
+    renderRegionOptions();
+    renderSuggestions();
+    renderConditions();
+    setStep("pick", { animate: false });
+  } catch (error) {
+    $("#pick-error").textContent = `지도를 불러오지 못했어요. ${error.message}`;
+  }
+}
+
 initialize();

@@ -2,439 +2,436 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#dff3ff">
-  <title>EcoRoute | 예상 탄소배출을 비교하는 길</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#ffffff">
+  <title>EcoRoute — 덜 배출하는 길 찾기</title>
+  <link rel="icon" href="/logo.png?v=2">
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="stylesheet" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+  <link rel="stylesheet" crossorigin href="https://cdn.jsdelivr.net/npm/@fontsource/barlow-semi-condensed@5/600.css">
+  <link rel="stylesheet" crossorigin href="https://cdn.jsdelivr.net/npm/@fontsource/barlow-semi-condensed@5/700.css">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <section id="intro-hero" class="intro-hero" aria-label="EcoRoute 시작 화면">
-    <div class="intro-orb intro-orb-one" aria-hidden="true"></div>
-    <div class="intro-orb intro-orb-two" aria-hidden="true"></div>
-    <div class="intro-content">
-      <div class="intro-kicker"><span></span> LOW-CARBON ROUTE NAVIGATION <span></span></div>
-      <div id="intro-stroke-text"></div>
-      <p>더 가벼운 이동을 위한 스마트 경로</p>
+  <div id="intro" class="intro" hidden>
+    <div class="intro-mark">
+      <img src="/logo.png" alt="">
+      <span><b>Eco</b>Route</span>
+      <svg class="intro-road" viewBox="0 0 240 12" aria-hidden="true"><path d="M2 6 H238"></path></svg>
     </div>
-    <button id="skip-intro" class="skip-intro" type="button" aria-label="시작 화면 건너뛰기">건너뛰기</button>
-  </section>
+  </div>
 
-  <header class="app-header">
-    <button class="brand" type="button" data-go-home aria-label="첫 화면으로">
-      <span class="brand-mark" aria-hidden="true">
-        <img src="/logo.png" alt="" class="brand-logo-image">
-      </span>
-      <span>ECOROUTE</span>
+  <header class="topbar">
+    <a class="brand" href="#plan" aria-label="EcoRoute 길찾기">
+      <img src="/logo.png" alt="">
+      <span><b>Eco</b>Route</span>
+    </a>
+    <nav class="tabs" aria-label="주요 메뉴">
+      <span class="tab-indicator" aria-hidden="true"></span>
+      <a href="#plan" data-tab="plan">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20c0-6 14-4 14-10a4 4 0 0 0-8 0M5 20h0"/><circle cx="15" cy="10" r="1.2"/><circle cx="5" cy="20" r="1.6"/></svg>
+        길찾기
+      </a>
+      <a href="#weekly" data-tab="weekly">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+        주간 리포트
+      </a>
+      <a href="#trips" data-tab="trips">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h0M4 12h0M4 18h0"/></svg>
+        내 기록
+      </a>
+    </nav>
+    <button id="account-button" class="account-button" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>
+      <span>로그인</span>
     </button>
-    <div class="auth-status">
-      <button id="auth-user" class="auth-user" type="button" hidden aria-label="계정 설정"></button>
-      <button id="trips-button" class="auth-button" type="button" hidden>내 기록</button>
-      <button id="auth-button" class="auth-button" type="button">로그인</button>
-    </div>
   </header>
 
-  <main class="app-main">
-    <section id="auth-screen" class="screen auth-screen" aria-labelledby="auth-title">
-      <form id="auth-form" class="auth-card">
-        <h1 id="auth-title">로그인</h1>
-        <div class="auth-tabs">
-          <button type="button" class="active" data-auth-mode="login" aria-pressed="true">로그인</button>
-          <button type="button" data-auth-mode="signup" aria-pressed="false">회원가입</button>
-        </div>
-        <label class="auth-field">아이디
-          <input name="username" autocomplete="username" required minlength="4" maxlength="20"
-            pattern="[a-z0-9_]+" title="영문 소문자, 숫자, _ (4–20자)">
-        </label>
-        <label class="auth-field" data-signup-only hidden>닉네임
-          <input name="nickname" autocomplete="nickname" maxlength="20">
-        </label>
-        <label class="auth-field">비밀번호
-          <input name="password" type="password" autocomplete="current-password" required minlength="8" maxlength="64">
-        </label>
-        <button id="auth-submit" class="primary-button" type="submit">로그인</button>
-        <p id="auth-error" class="form-error" role="alert"></p>
-        <button class="auth-cancel" type="button" data-go-home>돌아가기</button>
-      </form>
-    </section>
+  <main>
+    <section id="view-plan" class="view view-plan" aria-label="길찾기">
+      <aside id="panel" class="panel">
+        <button id="sheet-handle" class="sheet-handle" type="button" aria-label="패널 펼치기/접기" aria-expanded="true"></button>
 
-    <section id="setup-screen" class="screen active" aria-labelledby="setup-title">
-      <aside class="setup-panel">
-        <h1 id="setup-title">어디로 떠날까요?</h1>
-        <p class="lead">지도 위 도로 노드를 선택하면 모델이 예상 탄소배출이 낮다고 판단한 길을 찾아드려요.</p>
+        <!-- D1 지점 고르기 -->
+        <div class="step" data-step="pick">
+          <div class="step-body">
+            <h1 class="panel-title">어디로 갈까요?</h1>
+            <p id="pick-guide" class="guide" aria-live="polite"><b>1</b><span>지도에서 출발지를 눌러 주세요</span></p>
 
-        <div class="location-card">
-          <button id="start-field" class="location-field active" type="button" data-pick="start">
-            <span class="location-symbol start"></span>
-            <span><small>출발지</small><strong>지도에서 출발 노드를 선택하세요</strong></span>
-          </button>
-          <button id="swap-locations" class="swap-button" type="button" aria-label="출발지와 목적지 바꾸기">⇅</button>
-          <div class="location-line"></div>
-          <button id="destination-field" class="location-field" type="button" data-pick="destination">
-            <span class="location-symbol destination"></span>
-            <span><small>목적지</small><strong>지도에서 도착 노드를 선택하세요</strong></span>
-          </button>
-        </div>
+            <div class="stops">
+              <button id="stop-start" class="stop active" type="button" data-pick="start">
+                <i class="dot dot-start" aria-hidden="true"></i>
+                <span><small>출발</small><strong>지도에서 선택</strong></span>
+              </button>
+              <button id="stop-destination" class="stop" type="button" data-pick="destination">
+                <i class="dot dot-end" aria-hidden="true"></i>
+                <span><small>도착</small><strong>지도에서 선택</strong></span>
+              </button>
+              <button id="swap-stops" class="icon-button swap" type="button" aria-label="출발지와 도착지 바꾸기">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4v16M8 4 4 8M8 4l4 4M16 20V4M16 20l-4-4M16 20l4-4"/></svg>
+              </button>
+            </div>
 
-        <div class="form-section two-column">
-          <label class="input-group">
-            <span>출발시간</span>
-            <select id="departure-hour" aria-label="출발시간"></select>
-          </label>
-          <label class="input-group">
-            <span>요일</span>
-            <select id="departure-weekday" aria-label="운전 요일"></select>
-          </label>
-        </div>
+            <div id="suggestions" class="suggestions" hidden>
+              <p>자주 찾는 곳</p>
+              <div id="suggestion-chips" class="chips"></div>
+            </div>
 
-        <div class="form-section region-section">
-          <div class="input-group">
-            <span>지도 지역</span>
-            <div id="region-selector" class="region-selector" role="group" aria-label="지도 지역 선택"></div>
+            <details id="conditions" class="conditions">
+              <summary>
+                <span id="conditions-summary" class="conditions-summary"></span>
+                <span class="conditions-edit">바꾸기</span>
+              </summary>
+              <div class="conditions-body">
+                <div class="field-row">
+                  <label class="field">요일
+                    <select id="weekday"></select>
+                  </label>
+                  <label class="field">출발 시각
+                    <select id="hour"></select>
+                  </label>
+                </div>
+                <fieldset class="field">
+                  <legend>차종</legend>
+                  <div class="segmented" id="vehicle-options">
+                    <label><input type="radio" name="vehicle" value="compact"><span>소형<small>1.6L</small></span></label>
+                    <label><input type="radio" name="vehicle" value="midsize" checked><span>중형<small>2.5L</small></span></label>
+                    <label><input type="radio" name="vehicle" value="truck"><span>트럭<small>4.8L</small></span></label>
+                  </div>
+                </fieldset>
+                <fieldset class="field">
+                  <legend>지도 지역</legend>
+                  <div class="segmented" id="region-options"></div>
+                </fieldset>
+              </div>
+            </details>
+          </div>
+          <div class="step-foot">
+            <p id="pick-error" class="form-error" role="alert"></p>
+            <button id="find-routes" class="cta" type="button" disabled aria-describedby="cta-hint">경로 비교하기</button>
+            <p id="cta-hint" class="cta-hint"></p>
           </div>
         </div>
 
-        <fieldset class="vehicle-section">
-          <legend>차종</legend>
-          <div class="vehicle-grid">
-            <label class="vehicle-card">
-              <input type="radio" name="vehicle" value="compact">
-              <span class="vehicle-icon">🚗</span>
-              <strong>소형차</strong>
-              <small>1.6L</small>
-            </label>
-            <label class="vehicle-card selected">
-              <input type="radio" name="vehicle" value="midsize" checked>
-              <span class="vehicle-icon">🚙</span>
-              <strong>중형차</strong>
-              <small>2.5L</small>
-            </label>
-            <label class="vehicle-card">
-              <input type="radio" name="vehicle" value="truck">
-              <span class="vehicle-icon">🛻</span>
-              <strong>트럭</strong>
-              <small>4.8L</small>
-            </label>
+        <!-- D2 계산 중 -->
+        <div class="step" data-step="calc" hidden>
+          <div class="step-body">
+            <h2 class="panel-title">경로를 계산하고 있어요</h2>
+            <p class="panel-sub">지도와 조건은 그대로 두었어요. 보통 몇 초면 끝나요.</p>
+            <ol id="calc-steps" class="calc-steps">
+              <li>시간대별 교통량 불러오기</li>
+              <li>후보 경로 찾기</li>
+              <li>도로를 250m 구간으로 나누기</li>
+              <li>구간마다 에너지와 CO₂ 예측하기</li>
+            </ol>
           </div>
-        </fieldset>
+          <div class="step-foot">
+            <button id="cancel-calc" class="secondary" type="button">취소</button>
+          </div>
+        </div>
 
-        <button id="find-routes" class="primary-button" type="button" disabled>
-          친환경 경로 찾기
-          <span class="button-arrow" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"></path></svg>
-          </span>
-        </button>
-        <p id="setup-error" class="form-error" role="alert"></p>
+        <!-- D3 경로 비교 -->
+        <div class="step" data-step="compare" hidden>
+          <div class="step-body">
+            <button class="back-link" type="button" data-to-step="pick">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>조건 바꾸기
+            </button>
+            <h2 id="compare-title" class="panel-title">경로를 비교했어요</h2>
+            <p id="compare-meta" class="panel-sub"></p>
+            <fieldset class="routes">
+              <legend class="sr-only">경로 선택</legend>
+              <div id="route-list"></div>
+            </fieldset>
+            <p class="fineprint">모델이 추정한 휘발유 차량의 주행 중 직접 배출(tank-to-wheel)을 가장 빠른 길과 비교한 값이에요.</p>
+          </div>
+          <div class="step-foot">
+            <button id="choose-route" class="cta" type="button">이 경로로 선택하기</button>
+          </div>
+        </div>
+
+        <!-- D4 선택 완료 -->
+        <div class="step" data-step="done" hidden>
+          <div class="step-body">
+            <button class="back-link" type="button" data-to-step="compare">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>다른 경로 보기
+            </button>
+            <p id="done-meta" class="done-meta"></p>
+            <h2 id="done-title" class="panel-title">덜 배출하는 길을 골랐어요</h2>
+            <div class="done-figure">
+              <strong id="done-number" class="figure">0.0<small>%</small></strong>
+              <span id="done-label">가장 빠른 길보다 CO₂ 감소</span>
+            </div>
+            <div class="bars" aria-label="가장 빠른 길 대비 CO₂ 비교">
+              <div class="bar-row">
+                <span>가장 빠른 길</span>
+                <div class="bar-track"><i id="bar-fastest" class="bar bar-base"></i></div>
+                <b>100%</b>
+              </div>
+              <div class="bar-row">
+                <span>선택한 길</span>
+                <div class="bar-track"><i id="bar-chosen" class="bar"></i></div>
+                <b id="bar-chosen-label">100%</b>
+              </div>
+            </div>
+            <dl id="done-savings" class="savings"></dl>
+            <div class="week-strip">
+              <div class="week-strip-head">
+                <span>이번 주 기록</span>
+                <b id="week-count">0 / 7일</b>
+              </div>
+              <ol id="week-dots" class="week-dots"></ol>
+            </div>
+            <p id="save-status" class="save-status" role="status"></p>
+          </div>
+          <div class="step-foot two">
+            <a class="cta" href="#weekly">주간 리포트 보기</a>
+            <button id="restart" class="secondary" type="button">새 경로 찾기</button>
+          </div>
+        </div>
       </aside>
-
-      <div class="map-stage">
-        <div id="setup-map" class="map"></div>
-      </div>
+      <div id="map" class="map" aria-label="지도"></div>
+      <p id="map-caption" class="map-caption"></p>
     </section>
 
-    <section id="loading-screen" class="screen loading-screen" aria-live="polite">
-
-      <div class="loading-logo" aria-hidden="true">
-        <img src="/logo.png" alt="">
-      </div>
-
-      <div class="eyebrow light">
-        AI ECO NAVIGATION
-      </div>
-
-      <h2 class="text-shimmer">
-        친환경 경로를 찾고 있어요
-      </h2>
-
-      <p
-        id="loading-step"
-        class="text-shimmer loading-step-shimmer"
-      >
-        24시간 교통 프로필을 불러오고 있어요
-      </p>
-
-    </section>
-
-    <section id="routes-screen" class="screen routes-screen" aria-labelledby="routes-title">
-      <div class="results-map-wrap">
-        <div id="routes-map" class="map"></div>
-      </div>
-      <aside class="routes-panel">
-        <div class="results-heading">
-          <button class="back-button" type="button" data-go-home aria-label="처음으로 돌아가기">
-            <svg class="nav-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"></path></svg>
-          </button>
+    <!-- D5 주간 리포트 -->
+    <section id="view-weekly" class="view page" aria-labelledby="weekly-title" hidden>
+      <div class="page-inner">
+        <header class="page-head">
           <div>
-            <div class="eyebrow">ROUTE OPTIONS</div>
-            <h2 id="routes-title">추천 경로</h2>
+            <h1 id="weekly-title">이번 주 리포트</h1>
+            <p id="weekly-range" class="page-sub"></p>
           </div>
-        </div>
-        <div id="trip-summary" class="trip-summary"></div>
-        <p class="selection-guide"><span>1</span> 경로를 눌러 지도에서 확인하고 <span>2</span> 한 번 더 눌러 안내를 시작하세요.</p>
-        <div id="route-list" class="route-list"></div>
-        <div class="carbon-scope">표시값은 모델이 추정한 휘발유 차량의 주행 중 직접 배출량이며, 실제 배출량과 다를 수 있습니다.</div>
-      </aside>
-    </section>
+          <span id="weekly-progress" class="count-pill">0 / 7일</span>
+        </header>
 
-    <section id="impact-screen" class="screen impact-screen" aria-labelledby="impact-title">
-      <div class="impact-shell">
-        <div class="impact-hero">
-          <div class="impact-icon">✓</div>
-          <div class="eyebrow light">MODEL ESTIMATE</div>
-          <h2 id="impact-title">더 나은 길을 선택했어요</h2>
-          <p id="impact-message"></p>
-          <div class="saving-number"><strong id="impact-comparison">0%</strong><span id="impact-comparison-label">CO₂ 배출 절감</span></div>
+        <div id="weekly-empty" class="empty" hidden>
+          <p>이번 주에 고른 경로가 아직 없어요. 경로를 비교하고 하나를 고르면 여기에 쌓여요.</p>
+          <a class="cta inline" href="#plan">경로 찾으러 가기</a>
         </div>
-        <div class="impact-card">
-          <div class="impact-card-head">
-            <div>
-              <small>상대 탄소 배출 비교</small>
-              <h3>나의 선택 vs 가장 빠른 길</h3>
+
+        <div id="weekly-content">
+          <section class="summary" aria-label="주간 요약">
+            <div class="summary-main">
+              <strong id="weekly-change" class="figure">0.0<small>%</small></strong>
+              <p id="weekly-change-label">가장 빠른 길로만 다녔을 때보다 CO₂ 변화</p>
             </div>
-            <div id="comparison-chip" class="saving-chip">가장 빠른 길 대비</div>
-          </div>
-          <div class="bar-chart" aria-label="탄소 배출 비교 그래프">
-            <div class="bar-row">
-              <span>가장 빠른 길</span>
-              <div class="bar-track"><div id="fast-bar" class="bar fast"></div></div>
-              <strong id="fast-carbon">기준 100%</strong>
+            <dl class="summary-stats">
+              <div><dt>줄인 CO₂</dt><dd id="weekly-co2">0.00<small>kg</small></dd></div>
+              <div><dt>아낀 휘발유</dt><dd id="weekly-fuel">0.00<small>L</small></dd></div>
+              <div><dt>아낀 기름값</dt><dd id="weekly-cost">0<small>원</small></dd></div>
+            </dl>
+          </section>
+
+          <section class="block" aria-labelledby="chart-title">
+            <div class="block-head">
+              <h2 id="chart-title">요일별 변화</h2>
+              <p>막대가 위로 길수록 가장 빠른 길보다 CO₂를 덜 냈다는 뜻이에요.</p>
             </div>
-            <div class="bar-row">
-              <span>선택한 길</span>
-              <div class="bar-track"><div id="chosen-bar" class="bar eco"></div></div>
-              <strong id="chosen-carbon">100%</strong>
+            <div id="weekly-chart" class="week-chart" role="img"></div>
+          </section>
+
+          <section class="block" aria-labelledby="table-title">
+            <div class="block-head">
+              <h2 id="table-title">요일별 상세</h2>
             </div>
-          </div>
-          <div id="impact-route-meta" class="impact-route-meta"></div>
-          <p id="trip-save-status" class="trip-save-status" role="status"></p>
-          <p class="impact-disclaimer">동일한 모델·차량·출발시간 조건에서 계산한 상대 비교값입니다. 실제 절대 배출량(g)은 표시하지 않습니다.</p>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th scope="col">요일</th>
+                    <th scope="col">경로</th>
+                    <th scope="col" class="num">거리</th>
+                    <th scope="col" class="num">CO₂ 선택 / 빠른 길</th>
+                    <th scope="col" class="num">휘발유</th>
+                    <th scope="col" class="num">기름값</th>
+                    <th scope="col" class="num">변화</th>
+                  </tr>
+                </thead>
+                <tbody id="weekly-rows"></tbody>
+                <tfoot id="weekly-total"></tfoot>
+              </table>
+            </div>
+          </section>
         </div>
-        <div class="impact-actions">
-          <button id="view-weekly" class="weekly-button" type="button">
-            주간 기록 보기
-            <span class="button-arrow" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"></path></svg>
-            </span>
-          </button>
-          <button class="restart-button" type="button" data-go-home>다시 길찾기 <span>↻</span></button>
-        </div>
+
+        <p id="weekly-note" class="fineprint"></p>
       </div>
     </section>
 
-    <section id="weekly-screen" class="screen weekly-screen" aria-labelledby="weekly-title">
-      <div class="weekly-shell">
-        <div class="weekly-heading">
-          <button id="weekly-back" class="weekly-back" type="button">
-            <svg class="nav-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"></path></svg>
-            결과로
-          </button>
+    <!-- D6 내 기록 -->
+    <section id="view-trips" class="view page" aria-labelledby="trips-title" hidden>
+      <div class="page-inner">
+        <header class="page-head">
           <div>
-            <div class="eyebrow">WEEKLY ECO REPORT</div>
-            <h2 id="weekly-title">이번 주 탄소 절감 기록</h2>
-            <p>기록된 선택 경로와 가장 빠른 경로의 주간 합계를 비교합니다.</p>
+            <h1 id="trips-title">내 기록</h1>
+            <p class="page-sub">경로를 고를 때마다 자동으로 저장돼요.</p>
           </div>
-          <div id="weekly-progress" class="weekly-progress">0 / 7일</div>
+          <span id="trips-total" class="count-pill">0건</span>
+        </header>
+
+        <div id="trips-locked" class="empty" hidden>
+          <p>로그인하면 고른 경로가 계정에 쌓이고, 이름과 메모를 붙여 다시 볼 수 있어요.</p>
+          <button class="cta inline" type="button" data-login="trips">로그인</button>
         </div>
 
-        <div class="weekly-comparison-grid" aria-label="주간 경로 지표 비교">
-          <article class="weekly-comparison-card">
-            <div class="weekly-card-heading">
-              <h3>예상 CO₂ 배출량</h3>
-              <span>모델 환산값</span>
-            </div>
-            <div class="weekly-metric-row chosen">
-              <span><i aria-hidden="true"></i>선택 경로</span>
-              <strong id="weekly-co2-chosen">0.00 <small>kgCO₂eq</small></strong>
-            </div>
-            <div class="weekly-metric-row baseline">
-              <span><i aria-hidden="true"></i>가장 빠른 경로</span>
-              <strong id="weekly-co2-fastest">0.00 <small>kgCO₂eq</small></strong>
-            </div>
-          </article>
-
-          <article class="weekly-comparison-card">
-            <div class="weekly-card-heading">
-              <h3>예상 경유 사용량</h3>
-              <span>에너지 환산값</span>
-            </div>
-            <div class="weekly-metric-row chosen">
-              <span><i aria-hidden="true"></i>선택 경로</span>
-              <strong id="weekly-fuel-chosen">0.00 <small>L</small></strong>
-            </div>
-            <div class="weekly-metric-row baseline">
-              <span><i aria-hidden="true"></i>가장 빠른 경로</span>
-              <strong id="weekly-fuel-fastest">0.00 <small>L</small></strong>
-            </div>
-          </article>
-
-          <article class="weekly-comparison-card">
-            <div class="weekly-card-heading">
-              <h3>절약한 비용</h3>
-              <span id="weekly-cost-saving">경유 1,774원/L</span>
-            </div>
-            <div class="weekly-metric-row chosen">
-              <span><i aria-hidden="true"></i>선택 경로</span>
-              <strong id="weekly-cost-chosen">0<small>원</small></strong>
-            </div>
-            <div class="weekly-metric-row baseline">
-              <span><i aria-hidden="true"></i>가장 빠른 경로</span>
-              <strong id="weekly-cost-fastest">0<small>원</small></strong>
-            </div>
-          </article>
-
-          <article class="weekly-comparison-card">
-            <div class="weekly-card-heading">
-              <h3>총 에너지 사용량</h3>
-              <span>기록 요일 합계</span>
-            </div>
-            <div class="weekly-metric-row chosen">
-              <span><i aria-hidden="true"></i>선택 경로</span>
-              <strong id="weekly-energy-chosen">0.00 <small>kWh</small></strong>
-            </div>
-            <div class="weekly-metric-row baseline">
-              <span><i aria-hidden="true"></i>가장 빠른 경로</span>
-              <strong id="weekly-energy-fastest">0.00 <small>kWh</small></strong>
-            </div>
-          </article>
+        <div id="trips-content">
+          <form id="trips-filter" class="toolbar" role="search">
+            <input name="q" type="search" maxlength="50" placeholder="이름이나 메모로 검색" aria-label="검색어">
+            <select name="sort" aria-label="정렬">
+              <option value="driven_on:desc">최근 주행일순</option>
+              <option value="driven_on:asc">오래된 주행일순</option>
+              <option value="reduction_percent:desc">CO₂ 감소율 높은순</option>
+              <option value="distance_km:desc">거리 긴순</option>
+              <option value="chosen_energy_kwh:asc">에너지 적은순</option>
+            </select>
+          </form>
+          <p id="trips-empty" class="empty-line" hidden></p>
+          <ul id="trip-list" class="trip-list"></ul>
+          <p id="trips-error" class="form-error" role="alert"></p>
+          <nav class="pager" aria-label="페이지 이동">
+            <button id="trips-prev" class="secondary small" type="button">이전</button>
+            <span id="trips-page"></span>
+            <button id="trips-next" class="secondary small" type="button">다음</button>
+          </nav>
         </div>
-
-        <div class="weekly-chart-card">
-          <div class="weekly-chart-head">
-            <div>
-              <small>DAILY COMPARISON</small>
-              <h3>월요일부터 일요일까지</h3>
-            </div>
-            <span>가장 빠른 경로 대비 CO₂ 변화율</span>
-          </div>
-          <div class="weekly-chart-wrap">
-            <div id="weekly-chart" class="weekly-chart" aria-label="요일별 탄소 절감률 막대그래프"></div>
-          </div>
-          <p class="weekly-note">각 막대는 해당 요일의 가장 빠른 경로를 기준으로 계산한 상대 변화율입니다. 경유 사용량은 9.8kWh/L, 비용은 사용자가 지정한 1,774원/L를 적용한 모델 기반 참고값입니다. 같은 요일을 다시 기록하면 최신 결과로 교체됩니다. 로그인하면 이번 주 기록이 계정에 저장되고, 로그인하지 않으면 이 탭을 닫을 때 삭제됩니다.</p>
-        </div>
-
-        <button id="weekly-next-route" class="weekly-next-button" type="button" data-go-home>
-          다음 경로 찾기
-          <span class="button-arrow" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"></path></svg>
-          </span>
-        </button>
-      </div>
-    </section>
-
-    <section id="trips-screen" class="screen weekly-screen" aria-labelledby="trips-title">
-      <div class="weekly-shell">
-        <div class="weekly-heading">
-          <button class="weekly-back" type="button" data-go-home>
-            <svg class="nav-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"></path></svg>
-            길찾기
-          </button>
-          <div>
-            <div class="eyebrow">MY TRIPS</div>
-            <h2 id="trips-title">내 주행 기록</h2>
-            <p>경로를 확정할 때마다 자동으로 저장됩니다.</p>
-          </div>
-          <div id="trips-total" class="weekly-progress">0건</div>
-        </div>
-
-        <form id="trips-filter" class="trips-filter" role="search">
-          <input name="q" type="search" maxlength="50" placeholder="이름·메모 검색" aria-label="검색어">
-          <select name="sort" aria-label="정렬">
-            <option value="driven_on:desc">최근 주행일순</option>
-            <option value="driven_on:asc">오래된 주행일순</option>
-            <option value="reduction_percent:desc">절감률 높은순</option>
-            <option value="distance_km:desc">거리 긴순</option>
-            <option value="chosen_energy_kwh:asc">에너지 적은순</option>
-          </select>
-          <button type="submit">검색</button>
-        </form>
-
-        <p id="trips-empty" class="trips-empty" hidden></p>
-        <ul id="trip-list" class="trip-list"></ul>
-        <p id="trips-error" class="form-error" role="alert"></p>
-
-        <nav class="trips-pager" aria-label="페이지 이동">
-          <button id="trips-prev" type="button">이전</button>
-          <span id="trips-page"></span>
-          <button id="trips-next" type="button">다음</button>
-        </nav>
       </div>
     </section>
   </main>
 
   <template id="trip-row-template">
-    <li class="trip-row">
-      <div class="trip-main">
-        <strong class="trip-name"></strong>
-        <span class="trip-meta"></span>
-        <p class="trip-memo"></p>
-      </div>
-      <span class="trip-reduction"></span>
-      <div class="trip-actions">
-        <button type="button" data-action="edit">수정</button>
-        <button type="button" data-action="delete">삭제</button>
-      </div>
+    <li>
+      <button class="trip-row" type="button">
+        <span class="trip-date"><b></b><small></small></span>
+        <span class="trip-main"><strong></strong><span></span><em></em></span>
+        <span class="trip-distance num"></span>
+        <span class="delta"></span>
+      </button>
     </li>
   </template>
 
-  <dialog id="account-dialog" class="trip-dialog" aria-labelledby="account-dialog-title">
-    <div class="trip-edit-form">
-      <h3 id="account-dialog-title">계정 설정</h3>
-      <p id="account-username" class="account-username"></p>
-
-      <form id="nickname-form" class="account-section">
-        <label class="auth-field">닉네임
-          <input name="nickname" required maxlength="20" autocomplete="nickname">
+  <!-- D6 상세 드로어 -->
+  <dialog id="trip-drawer" class="drawer" aria-labelledby="drawer-title">
+    <div class="drawer-head">
+      <h2 id="drawer-title">기록 상세</h2>
+      <button class="icon-button" type="button" data-close aria-label="닫기">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="drawer-body">
+      <div class="drawer-figure">
+        <strong id="drawer-change" class="figure"></strong>
+        <span id="drawer-change-label"></span>
+      </div>
+      <dl id="drawer-facts" class="facts"></dl>
+      <form id="trip-edit-form" class="stack">
+        <label class="field">이름
+          <input name="name" required maxlength="50">
         </label>
-        <button class="auth-button" type="submit">닉네임 변경</button>
+        <label class="field">주행일
+          <input name="driven_on" type="date" required>
+        </label>
+        <label class="field">메모
+          <textarea name="memo" maxlength="500" rows="3" placeholder="예: 학교 앞 공사 구간을 피함"></textarea>
+        </label>
+        <p id="trip-edit-error" class="form-error" role="alert"></p>
+        <div class="row-actions">
+          <button id="trip-delete" class="danger-link" type="button">기록 삭제</button>
+          <button class="cta" type="submit">변경 저장</button>
+        </div>
       </form>
-
-      <form id="password-form" class="account-section">
-        <label class="auth-field">현재 비밀번호
-          <input name="current_password" type="password" required autocomplete="current-password">
-        </label>
-        <label class="auth-field">새 비밀번호
-          <input name="new_password" type="password" required minlength="8" maxlength="64" autocomplete="new-password">
-        </label>
-        <button class="auth-button" type="submit">비밀번호 변경</button>
-      </form>
-
-      <form id="delete-account-form" class="account-section danger">
-        <label class="auth-field">회원 탈퇴 (주행 기록도 모두 삭제됩니다)
-          <input name="password" type="password" required placeholder="비밀번호 확인" autocomplete="current-password">
-        </label>
-        <button class="auth-button danger" type="submit">탈퇴하기</button>
-      </form>
-
-      <p id="account-message" class="form-error" role="alert"></p>
-      <button id="account-close" class="auth-cancel" type="button">닫기</button>
     </div>
   </dialog>
 
-  <dialog id="trip-dialog" class="trip-dialog" aria-labelledby="trip-dialog-title">
-    <form id="trip-edit-form" class="trip-edit-form">
-      <h3 id="trip-dialog-title">주행 기록 수정</h3>
-      <label class="auth-field">이름
-        <input name="name" required maxlength="50">
-      </label>
-      <label class="auth-field">주행일
-        <input name="driven_on" type="date" required>
-      </label>
-      <label class="auth-field">메모
-        <textarea name="memo" maxlength="500" rows="4"></textarea>
-      </label>
-      <p id="trip-edit-error" class="form-error" role="alert"></p>
-      <div class="trip-dialog-actions">
-        <button id="trip-edit-cancel" class="auth-button" type="button">취소</button>
-        <button class="primary-button" type="submit">저장</button>
+  <!-- D7 로그인 모달 -->
+  <dialog id="auth-dialog" class="modal" aria-labelledby="auth-title">
+    <form id="auth-form" class="stack">
+      <div class="modal-head">
+        <h2 id="auth-title">로그인</h2>
+        <button class="icon-button" type="button" data-close aria-label="닫기">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
       </div>
+      <p id="auth-reason" class="modal-sub" hidden></p>
+      <div class="segmented auth-modes">
+        <label><input type="radio" name="mode" value="login" checked><span>로그인</span></label>
+        <label><input type="radio" name="mode" value="signup"><span>회원가입</span></label>
+      </div>
+      <label class="field">아이디
+        <input name="username" autocomplete="username" required minlength="4" maxlength="20"
+          pattern="[a-z0-9_]+" title="영문 소문자, 숫자, _ (4–20자)">
+      </label>
+      <label class="field" data-signup-only hidden>닉네임
+        <input name="nickname" autocomplete="nickname" maxlength="20">
+      </label>
+      <label class="field">비밀번호
+        <input name="password" type="password" autocomplete="current-password" required minlength="8" maxlength="64">
+      </label>
+      <p id="auth-error" class="form-error" role="alert"></p>
+      <button id="auth-submit" class="cta" type="submit">로그인</button>
     </form>
+    <div id="migrate" class="stack" hidden>
+      <div class="modal-head"><h2>이 탭의 기록을 옮길까요?</h2></div>
+      <p id="migrate-text" class="modal-sub"></p>
+      <p id="migrate-error" class="form-error" role="alert"></p>
+      <div class="row-actions">
+        <button class="secondary" type="button" data-close>나중에</button>
+        <button id="migrate-confirm" class="cta" type="button">계정에 옮기기</button>
+      </div>
+    </div>
   </dialog>
+
+  <!-- 계정 설정 -->
+  <dialog id="account-dialog" class="modal" aria-labelledby="account-title">
+    <div class="stack">
+      <div class="modal-head">
+        <h2 id="account-title">계정</h2>
+        <button class="icon-button" type="button" data-close aria-label="닫기">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <p id="account-username" class="modal-sub"></p>
+      <button id="logout" class="secondary" type="button">로그아웃</button>
+      <form id="nickname-form" class="stack sub-form">
+        <label class="field">닉네임
+          <input name="nickname" required maxlength="20" autocomplete="nickname">
+        </label>
+        <button class="secondary" type="submit">닉네임 바꾸기</button>
+      </form>
+      <form id="password-form" class="stack sub-form">
+        <label class="field">현재 비밀번호
+          <input name="current_password" type="password" required autocomplete="current-password">
+        </label>
+        <label class="field">새 비밀번호
+          <input name="new_password" type="password" required minlength="8" maxlength="64" autocomplete="new-password">
+        </label>
+        <button class="secondary" type="submit">비밀번호 바꾸기</button>
+      </form>
+      <details class="sub-form danger-zone">
+        <summary>회원 탈퇴</summary>
+        <form id="delete-account-form" class="stack">
+          <p class="modal-sub">탈퇴하면 주행 기록도 모두 지워지고 되돌릴 수 없어요.</p>
+          <label class="field">비밀번호 확인
+            <input name="password" type="password" required autocomplete="current-password">
+          </label>
+          <button class="danger" type="submit">탈퇴하기</button>
+        </form>
+      </details>
+      <p id="account-message" class="form-error" role="alert"></p>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden>
+    <span id="toast-text"></span>
+    <button id="toast-action" type="button" hidden></button>
+  </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="https://unpkg.com/animejs@4.5.0/dist/bundles/anime.umd.min.js"
+    integrity="sha384-InMmvD3VoYcY7hGjSC80aLb2bNNE4CzpX+Eq6FVDlmB0IKgDvmfPw4UY8L/M++iG" crossorigin=""></script>
+  <script src="https://unpkg.com/motion@12.43.0/dist/motion.js"
+    integrity="sha384-hgVFh5YKDMdpcWEjpRqk2kPXOKBH7I9NBCKe3uR6dHKgy/BWPe8kyL01kiYuRn1u" crossorigin=""></script>
   <script src="/app.js"></script>
 </body>
 </html>
