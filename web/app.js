@@ -419,8 +419,7 @@ function renderConditions() {
   const isNow = hour === new Date().getHours() && weekday === todayIndex();
   const region = state.config?.regions.find((item) => item.key === state.config.region);
   $("#conditions-summary").innerHTML = [
-    isNow ? '<span class="now">지금 출발</span>' : "",
-    `<span>${WEEK[weekday]}요일 ${pad2(hour)}:00</span>`,
+    isNow ? '<span class="now">지금 출발</span>' : `<span>${WEEK[weekday]} ${pad2(hour)}:00</span>`,
     `<span>${VEHICLE_LABELS[vehicle]}</span>`,
     region ? `<span>${escapeHtml(region.short_label)}</span>` : "",
   ].join("");

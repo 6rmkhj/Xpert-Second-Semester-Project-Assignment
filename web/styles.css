@@ -223,7 +223,7 @@ main { position: fixed; inset: var(--topbar) 0 var(--tabbar); }
 .row-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 
 .segmented { display: flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--canvas); }
-.segmented label { flex: 1; min-width: 0; }
+.segmented label { position: relative; flex: 1; min-width: 0; }
 .segmented input { position: absolute; opacity: 0; pointer-events: none; }
 .segmented span {
   display: flex;
@@ -364,14 +364,16 @@ main { position: fixed; inset: var(--topbar) 0 var(--tabbar); }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   padding: 14px 0;
   list-style: none;
   cursor: pointer;
 }
 .conditions summary::-webkit-details-marker { display: none; }
-.conditions-summary { display: flex; flex-wrap: wrap; gap: 6px; font-size: 14px; font-weight: 650; }
-.conditions-summary span { padding: 3px 9px; border-radius: 6px; background: var(--canvas); }
+.conditions-summary { display: flex; gap: 4px; min-width: 0; font-size: 14px; font-weight: 650; }
+.conditions-summary span { flex: none; padding: 3px 7px; border-radius: 6px; background: var(--canvas); white-space: nowrap; }
+/* 자리가 모자라면 마지막 칩(지역)만 말줄임 */
+.conditions-summary span:last-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .conditions-summary .now { background: var(--ink); color: #fff; }
 .conditions-edit { flex: none; color: var(--blue); font-size: 14px; font-weight: 650; }
 .conditions[open] .conditions-edit { color: var(--muted); }
